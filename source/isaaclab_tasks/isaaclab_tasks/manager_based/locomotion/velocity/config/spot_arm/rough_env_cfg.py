@@ -193,6 +193,11 @@ class SpotArmRewardsCfg:
         weight=5.0,
         params={"std": 1.0, "ramp_rate": 0.5, "ramp_at_vel": 1.0, "asset_cfg": SceneEntityCfg("robot")},
     )
+    link_angle_alignment = RewardTermCfg(
+        func=spot_arm_mdp.arm_alignment_reward,
+        weight=1.2,
+        params={"std": 0.5, "asset_cfg": SceneEntityCfg("robot"), "link_body_names": "arm0_link_el1"}
+    )
     foot_clearance = RewardTermCfg(
         func=spot_arm_mdp.foot_clearance_reward,
         weight=0.5,

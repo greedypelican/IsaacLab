@@ -15,6 +15,7 @@ import torch
 from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation, RigidObject
+from isaaclab.utils.math import matrix_from_quat
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import ContactSensor
 
@@ -81,6 +82,64 @@ def base_linear_velocity_reward(
     vel_cmd_magnitude = torch.linalg.norm(target, dim=1)
     velocity_scaling_multiple = torch.clamp(1.0 + ramp_rate * (vel_cmd_magnitude - ramp_at_vel), min=1.0)
     return torch.exp(-lin_vel_error / std) * velocity_scaling_multiple
+
+
+def arm_alignment_reward(
+        env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, std: float, link_body_names: str
+) -> torch.Tensor:
+    asset: Articulation = env.scene[asset_cfg.name]
+    # robot's velocity
+    vel_world: torch.Tensor = asset.data.root_lin_vel_w
+    vel_xy: torch.Tensor = vel_world[:, :2]
+    vel_norm: torch.Tensor = torch.linalg.norm(vel_xy, dim=1, keepdim=True)
+    # index of whether moving or not
+    moving_mask = vel_norm.squeeze(1) > 1e-3
+    # velocity direction
+    vel_dir: torch.Tensor = vel_xy / vel_norm.clamp(min=1e-6)
+    # robot body's global tf
+    base_quat: torch.Tensor = asset.data.root_quat_w
+    base_R: torch.Tensor = matrix_from_quat(base_quat)
+    base_x_world: torch.Tensor = base_R[:, :, 0]
+    base_x_xy: torch.Tensor = base_x_world[:, :2]
+    base_x_norm: torch.Tensor = torch.linalg.norm(base_x_xy, dim=1, keepdim=True).clamp(min=1e-6)
+    base_x_dir: torch.Tensor = base_x_xy / base_x_norm
+    # set goal direction (if velocity exists: vel_dir, else: base_x_dir)
+    goal_dir = torch.where(moving_mask.unsqueeze(1), vel_dir, base_x_dir)
+    # get link's global tf
+    link_ids = asset.find_bodies(link_body_names)[0]
+    quat_link: torch.Tensor = asset.data.body_quat_w[:, link_ids[0], :]
+    rot_mat: torch.Tensor = matrix_from_quat(quat_link)
+    link_x_axis_world: torch.Tensor = rot_mat[:, :, 0]
+    link_x_xy: torch.Tensor = link_x_axis_world[:, :2]
+    link_x_norm: torch.Tensor = torch.linalg.norm(link_x_xy, dim=1, keepdim=True).clamp(min=1e-6)
+    link_x_dir: torch.Tensor = link_x_xy / link_x_norm
+    # get cosine similarity between goal_dir and link's global tf
+    cos_sim: torch.Tensor = torch.sum(goal_dir * link_x_dir, dim=1).clamp(-1.0, 1.0)
+
+    return torch.exp(-torch.acos(cos_sim) / std)
+
+
+def arm_plane_alignment_reward(
+        env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, link_body_names: str, std: float,
+) -> torch.Tensor:
+    asset: Articulation = env.scene[asset_cfg.name]
+    # xz plane's normal vector of robot's velocity
+    vel_world: torch.Tensor = asset.data.root_lin_vel_w
+    batch_size = vel_world.shape[0]
+    z_axis = torch.tensor([0.0, 0.0, 1.0], device=vel_world.device).unsqueeze(0).expand(batch_size, -1)
+    cross = torch.cross(vel_world, z_axis, dim=1)
+    norm_cross = torch.linalg.norm(cross, dim=1, keepdim=True).clamp(min=1e-6)
+    n = cross / norm_cross
+    # get link's global tf
+    link_ids = asset.find_bodies(link_body_names)[0]
+    quat_link: torch.Tensor = asset.data.body_quat_w[:, link_ids[0], :]
+    rot_mat: torch.Tensor = matrix_from_quat(quat_link)
+    link_x_axis_world: torch.Tensor = rot_mat[:, :, 0]
+    # calculate similarity
+    dot_val: torch.Tensor = torch.sum(n * link_x_axis_world, dim=1)
+    abs_dot: torch.Tensor = torch.abs(dot_val)
+
+    return torch.exp(-abs_dot / std)
 
 
 class GaitReward(ManagerTermBase):

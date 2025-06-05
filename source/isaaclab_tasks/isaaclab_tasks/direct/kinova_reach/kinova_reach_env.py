@@ -67,20 +67,31 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.7, 1.3),
-            "damping_distribution_params": (0.7, 1.3),
+            "stiffness_distribution_params": (0.5, 2.0),
+            "damping_distribution_params": (0.5, 2.0),
             "operation": "scale",
-            "distribution": "uniform",
+            "distribution": "log_uniform",
+        },
+    )
+    robot_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "friction_distribution_params": (0.2, 4.0),
+            "operation": "scale",
+            "distribution": "log_uniform",
         },
     )
     robot_joint_pos_limits = EventTerm(
         func=mdp.randomize_joint_parameters,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "friction_distribution_params": (0.7, 1.3),
-            "operation": "scale",
-            "distribution": "uniform",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=["joint_2", "joint_3", "joint_5"]),
+            "lower_limit_distribution_params": (0.0, 0.01),
+            "upper_limit_distribution_params": (0.0, 0.01),
+            "operation": "add",
+            "distribution": "gaussian",
         },
     )
 
@@ -145,17 +156,17 @@ class KinovaReachEnvCfg(DirectRLEnvCfg):
         actuators={
             "kinova_shoulder": ImplicitActuatorCfg(
                 joint_names_expr=["joint_1", "joint_2", "joint_3"],
-                effort_limit_sim=35.0,
-                velocity_limit_sim=0.84,
-                stiffness=80.0,
-                damping=4.0,
+                effort_limit_sim=39.0,
+                velocity_limit_sim=0.87,
+                stiffness=40.0,
+                damping=1.0,
             ),
             "kinova_forearm": ImplicitActuatorCfg(
                 joint_names_expr=["joint_4", "joint_5", "joint_6"],
-                effort_limit_sim=17.0,
-                velocity_limit_sim=0.73,
-                stiffness=80.0,
-                damping=4.0,
+                effort_limit_sim=9.0,
+                velocity_limit_sim=0.87,
+                stiffness=15.0,
+                damping=0.5,
             ),
             "kinova_hand": ImplicitActuatorCfg(
                 joint_names_expr=["robotiq_85_left_knuckle_joint"],

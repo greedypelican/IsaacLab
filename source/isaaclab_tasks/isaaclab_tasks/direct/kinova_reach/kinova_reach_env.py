@@ -41,17 +41,6 @@ def quat_conjugate_apply(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
 
 @configclass
 class EventCfg:
-    robot_link_friction = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.7, 1.3),
-            "dynamic_friction_range": (0.7, 1.3),
-            "restitution_range": (0.0, 0.3),
-            "num_buckets": 128,
-        },
-    )
     robot_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
@@ -78,7 +67,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "friction_distribution_params": (0.2, 4.0),
+            "friction_distribution_params": (0.2, 2.0),
             "operation": "scale",
             "distribution": "log_uniform",
         },
@@ -122,7 +111,7 @@ class KinovaReachEnvCfg(DirectRLEnvCfg):
     )
 
     # Scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=2.0, replicate_physics=True)
 
     # Robot
     robot: ArticulationCfg = ArticulationCfg(
@@ -196,7 +185,7 @@ class KinovaReachEnvCfg(DirectRLEnvCfg):
     # Stable termination
     stable_frames_required = 10
 
-    # events: EventCfg = EventCfg()
+    events: EventCfg = EventCfg()
 
 
 class KinovaReachEnv(DirectRLEnv):

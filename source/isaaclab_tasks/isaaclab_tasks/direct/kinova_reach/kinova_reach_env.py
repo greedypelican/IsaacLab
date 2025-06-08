@@ -146,14 +146,14 @@ class KinovaReachEnvCfg(DirectRLEnvCfg):
             "kinova_shoulder": ImplicitActuatorCfg(
                 joint_names_expr=["joint_1", "joint_2", "joint_3"],
                 effort_limit_sim=39.0,
-                velocity_limit_sim=0.87,
+                velocity_limit_sim=0.7,
                 stiffness=40.0,
                 damping=1.0,
             ),
             "kinova_forearm": ImplicitActuatorCfg(
                 joint_names_expr=["joint_4", "joint_5", "joint_6"],
                 effort_limit_sim=9.0,
-                velocity_limit_sim=0.87,
+                velocity_limit_sim=0.7,
                 stiffness=15.0,
                 damping=0.5,
             ),
@@ -171,12 +171,13 @@ class KinovaReachEnvCfg(DirectRLEnvCfg):
     markers = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Markers")
     markers.markers["frame"].scale = (0.07, 0.07, 0.07)
 
-    # Rewards and penalties
-    DIST_REWARD_SCALE = 1
-    ORI_PENALTY_SCALE = 1
-    ACTION_PENALTY_SCALE = 0.02
-    #DELTA_ACTION_SCALE = 0.05
-    DELTA_PENALTY_SCALE = 0.07
+    # scales for rewards and penalties
+    DIST_REWARD_SCALE = 1.0 
+    ORI_REWARD_SCALE = 1.0
+    ACTION_PENALTY_SCALE = 0.015
+    DELTA_PENALTY_SCALE = 0.1
+    ACCEL_PENALTY_SCALE = 0.03
+    TORQUE_PENALTY_SCALE = 0.0003
 
     # Parameters for stuck condition:
     stuck_distance_threshold: float = 0.2  # If tip is farther than this from target, it is considered far.
@@ -198,12 +199,14 @@ class KinovaReachEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         self.robot_dof_lower_limits = self._robot.data.soft_joint_pos_limits[0, :, 0].to(self.device)
         self.robot_dof_upper_limits = self._robot.data.soft_joint_pos_limits[0, :, 1].to(self.device)
+        self.effort_penalty = torch.zeros(self.num_envs, device=self.device)
 
         # Target position (per environment)
         self.target_pos = torch.tensor([0.5, 0.0, 0.3], device=self.device).repeat(self.num_envs, 1)
 
-        # Action history for delta penalty
+        # Action history for delta penalty and acceleration penalty
         self.actions_last = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
+        self.actions_prev = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
 
         # Counter for stable frames at goal
         self.time_at_goal = torch.zeros(self.num_envs, device=self.device)
@@ -235,7 +238,6 @@ class KinovaReachEnv(DirectRLEnv):
             translation=(0.55, 0.0, 0.0),
             orientation=(0.70711, 0.0, 0.0, 0.70711),
         )
-
         # Replicate the environment
         self.scene.clone_environments(copy_from_source=False)
         self.scene.articulations["robot"] = self._robot
@@ -253,20 +255,10 @@ class KinovaReachEnv(DirectRLEnv):
         # Get gripper's orientation and translation using the correct attribute.
         gripper_pos = self._robot.data.body_pos_w[:, self._robot.find_bodies("robotiq_85_base_link")[0][0]]
         gripper_quat = self._robot.data.body_quat_w[:, self._robot.find_bodies("robotiq_85_base_link")[0][0]]
-        # gripper_front = torch.tensor([1.0, 0.0, 0.0], device=self.device)\
-        #     .unsqueeze(0).repeat(self.num_envs, 1)
-        # gripper_front_world = quat_apply(gripper_quat, gripper_front)
-        # tip_pos = gripper_pos + 0.14 * gripper_front_world
         tip_pos = gripper_pos
         return gripper_quat, tip_pos
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        """
-        Convert policy actions to delta joint targets, clamp to limits, and update markers.
-        """
-        # current_joint_pos = self._robot.data.joint_pos.clone()
-        # delta_pos = self.cfg.DELTA_ACTION_SCALE * actions
-        # target_pos = current_joint_pos + delta_pos
         target_pos = torch.clamp(actions, self.robot_dof_lower_limits, self.robot_dof_upper_limits)     
         self.actions = target_pos
         target = self._get_target()
@@ -275,7 +267,6 @@ class KinovaReachEnv(DirectRLEnv):
         self.scene.tip_markers.visualize(tip_pos)
 
     def _apply_action(self) -> None:
-        """Send position targets to the robot."""
         self._robot.set_joint_position_target(self.actions)
 
     def _get_observations(self) -> dict:
@@ -286,30 +277,21 @@ class KinovaReachEnv(DirectRLEnv):
         target = self._get_target()
         to_target = target - tip_pos
 
-        # for i, name in enumerate(self._robot.data.joint_names):
-        #     print(f"joint index {i}: {name}")
-
         obs = torch.cat((joint_pos_7, joint_vel_7, tip_pos, target, to_target), dim=-1)
         return {"policy": torch.clamp(obs, -5.0, 5.0)}
 
     def _get_rewards(self) -> torch.Tensor:
-        """
-        Reward = distance reward - (action penalty + delta penalty + orientation penalty).
-        Additionally, if the gripper's tip is out-of-bounds (z < 0) or the tip is stuck
-        (far from target and not moving), an extra penalty is applied.
-        """
-        action_penalty = torch.sum(self.actions**2, dim=-1) * self.cfg.ACTION_PENALTY_SCALE
-        delta_actions = self.actions - self.actions_last
-        delta_penalty = self.cfg.DELTA_PENALTY_SCALE * torch.sum(delta_actions**2, dim=-1)
-
         target = self._get_target()
         gripper_quat, tip_pos = self._get_gripper_tip_pos()
 
+        # ---------- reward ---------- #
+        # distance
         dist = torch.norm(abs(tip_pos - target), dim=-1)
         self.last_episode_distance = dist.detach()
         raw_dist_reward = torch.exp(-2.3 * (dist - 0.176)) - 0.15
         dist_reward = self.cfg.DIST_REWARD_SCALE * raw_dist_reward
 
+        # orientation
         gripper_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)\
             .unsqueeze(0).repeat(self.num_envs, 1)
         gripper_front = torch.tensor([1.0, 0.0, 0.0], device=self.device)\
@@ -320,39 +302,64 @@ class KinovaReachEnv(DirectRLEnv):
             .unsqueeze(0).repeat(self.num_envs, 1)
         global_front = torch.tensor([1.0, 0.0, 0.0], device=self.device)\
             .unsqueeze(0).repeat(self.num_envs, 1)
+        
         down_alignment = torch.sum(gripper_front_world * global_up, dim=-1)
         front_alignment = torch.sum(gripper_up_world * global_front, dim=-1)
         alignment = (1.5 * (1 - (down_alignment + 1) / 2) + ((front_alignment + 1) / 2)) / 2.5
-        # alignment = 1.0 - (down_alignment + 1.0) / 2.0
-        raw_orientation_penalty = torch.log10(-0.7 * (alignment - 1.143)) + 1
-        orientation_penalty = self.cfg.ORI_PENALTY_SCALE * raw_orientation_penalty
 
-        # Update self.out_of_bounds: 1.0 where tip_pos z-value is below 0.
+        raw_orientation_reward = torch.exp(1.5 * (alignment -1.4)) -0.12
+        orientation_reward = self.cfg.ORI_REWARD_SCALE * raw_orientation_reward
+        # ---------- reward ---------- #
+
+
+        # ---------- penalty ---------- #
+        # torque
+        torques = self._robot.data.applied_torque
+        indices = [self._robot.find_joints(jn)[0][0] for jn in ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]]
+        used_torques = torques[:, indices]
+        torque_penalty = self.cfg.TORQUE_PENALTY_SCALE * torch.sum(used_torques**2, dim=-1)
+        
+        # action
+        action_penalty = torch.sum(self.actions**2, dim=-1) * self.cfg.ACTION_PENALTY_SCALE
+
+        # delta(stepwise change)
+        delta_actions = self.actions - self.actions_last
+        delta_penalty = self.cfg.DELTA_PENALTY_SCALE * torch.sum(delta_actions**2, dim=-1)
+
+        # acceleration
+        acceleration = self.actions - 2 * self.actions_last + self.actions_prev
+        accel_penalty = self.cfg.ACCEL_PENALTY_SCALE * torch.sum(acceleration**2, dim=-1)
+        
+        # out of bounds
         self.out_of_bounds = (tip_pos[:, 2] < 0.15).float()
         out_of_bounds_penalty = 10.0 * self.out_of_bounds
 
-        # Compute joint velocity norm.
+        # stuck
         joint_vel_norm = torch.norm(self._robot.data.joint_vel, dim=-1)
-        # Define stuck condition: if the tip is far from target (distance > threshold)
-        # and the joint velocities are very low (indicating little or no movement).
         self.stuck_condition = ((dist > self.cfg.stuck_distance_threshold) & (joint_vel_norm < self.cfg.stuck_velocity_threshold)).float()
         stuck_penalty = 10.0 * self.stuck_condition
+        # ---------- penalty ---------- #
 
-        reward = dist_reward - orientation_penalty - action_penalty - delta_penalty - out_of_bounds_penalty - stuck_penalty
 
+        reward = dist_reward + orientation_reward \
+                - torque_penalty -action_penalty - delta_penalty - accel_penalty - out_of_bounds_penalty - stuck_penalty
         self.extras["log"] = {
             "distance": dist.mean(),
-            "dist_reward": dist_reward.mean(),
             "down_alignment": down_alignment,
             "front_alignment": front_alignment,
-            "orientation_penalty": orientation_penalty.mean(),
+            "dist_reward": dist_reward.mean(),
+            "orientation_reward": orientation_reward.mean(),
+            "torque_penalty": torque_penalty.mean(),
             "action_penalty": action_penalty.mean(),
             "delta_penalty": delta_penalty.mean(),
+            "accel_penalty": accel_penalty.mean(),
             "out_of_bounds_penalty": out_of_bounds_penalty.mean(),
             "stuck_penalty": stuck_penalty.mean(),
         }
 
+        self.actions_prev = self.actions_last.clone()
         self.actions_last = self.actions.clone()
+
         return reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -427,16 +434,6 @@ class KinovaReachEnv(DirectRLEnv):
         self.target_pos[env_ids, 0] = sample_uniform(x_min, x_max, (len(env_ids), ), self.device)
         self.target_pos[env_ids, 1] = sample_uniform(y_min, y_max, (len(env_ids), ), self.device)
         self.target_pos[env_ids, 2] = sample_uniform(z_min, z_max, (len(env_ids), ), self.device)
-
-        # r_inner, r_outer = 0.15, 0.35
-        # y_min, y_max = 0.2, 0.4
-        # theta = sample_uniform(0.0, 2 * torch.pi, (len(env_ids), ), self.device)
-        # self.target_pos[env_ids, 0] = \
-        #     sample_uniform(r_inner, r_outer, (len(env_ids), ), self.device) * torch.cos(theta)
-        # self.target_pos[env_ids, 1] = \
-        #     sample_uniform(r_inner, r_outer, (len(env_ids), ), self.device) * torch.sin(theta)
-        # self.target_pos[env_ids, 2] = \
-        #     sample_uniform(y_min, y_max, (len(env_ids), ), self.device)
         
         self.time_at_goal[env_ids] = 0
         self.actions_last[env_ids] = 0.0

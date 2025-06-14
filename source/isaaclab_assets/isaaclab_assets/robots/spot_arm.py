@@ -151,18 +151,18 @@ SPOT_ARM_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.7),
         joint_pos={
-            "[fh]l_hx": 0.1,  # all left hip_x
+            "[fh]l_hx": 0.1,   # all left hip_x
             "[fh]r_hx": -0.1,  # all right hip_x
-            "f[rl]_hy": 0.9,  # front hip_y
-            "h[rl]_hy": 1.1,  # hind hip_y
-            ".*_kn": -1.5,  # all knees
+            "f[rl]_hy": 0.9,   # front hip_y
+            "h[rl]_hy": 1.1,   # hind hip_y
+            ".*_kn"   : -1.5,  # all knees
             "arm0_sh0": 0.0,
-            "arm0_sh1": -2.6, #-150
-            "arm0_el0": 2.8, #160
-            "arm0_el1": 0.0, # 0
-            "arm0_wr0": 0.9, #50
-            "arm0_wr1": 0.0, #0.0
-            "arm0_f1x": -0.7, #-40
+            "arm0_sh1": -3.1,  #-177.617
+            "arm0_el0": 2.8,   #160.428
+            "arm0_el1": 0.0,   #0
+            "arm0_wr0": 0.3,   #17.189     
+            "arm0_wr1": 0.0,   #0
+            "arm0_f1x": 0.0,   #0
         },
         joint_vel={".*": 0.0},
     ),

@@ -193,10 +193,23 @@ class SpotArmRewardsCfg:
         weight=5.0,
         params={"std": 1.0, "ramp_rate": 0.5, "ramp_at_vel": 1.0, "asset_cfg": SceneEntityCfg("robot")},
     )
-    link_angle_alignment = RewardTermCfg(
-        func=spot_arm_mdp.arm_alignment_reward,
-        weight=1.2,
-        params={"std": 0.5, "asset_cfg": SceneEntityCfg("robot"), "link_body_names": "arm0_link_el1"}
+    arm_direction = RewardTermCfg(
+        func = spot_arm_mdp.arm_direction_reward,
+        weight=10.0,
+        params = {
+            "asset_cfg": SceneEntityCfg("robot"),
+            "std": 0.1,
+            "link_body_names": "arm0_link_wr0",
+        },
+    )
+    arm_orientation = RewardTermCfg(
+        func = spot_arm_mdp.arm_orientation_reward,
+        weight=5.0,
+        params = {
+            "asset_cfg": SceneEntityCfg("robot"),
+            "std": 0.1,
+            "link_body_names": "arm0_link_wr1",
+        },
     )
     foot_clearance = RewardTermCfg(
         func=spot_arm_mdp.foot_clearance_reward,
@@ -324,8 +337,6 @@ class SpotArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
-
-
 
 
 class SpotArmRoughEnvCfg_PLAY(SpotArmRoughEnvCfg):

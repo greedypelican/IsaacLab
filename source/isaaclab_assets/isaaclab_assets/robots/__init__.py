@@ -25,3 +25,7 @@ from .shadow_hand import *
 from .spot import *
 from .unitree import *
 from .universal_robots import *
+
+from .kinovagen3n6 import *
+from .spot_arm import *
+from .go2_custom import *

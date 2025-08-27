@@ -7,6 +7,7 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
     prim_path="/World/envs/env_.*/Robot", 
     spawn=sim_utils.UsdFileCfg(
         usd_path="../Assets/Collected_kinovagen3n6/kinovagen3n6_v2.usd", 
+        activate_contact_sensors=True, 
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False, 
             max_depenetration_velocity=5.0, 
@@ -16,7 +17,6 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
             solver_position_iteration_count=12, 
             solver_velocity_iteration_count=1, 
         ), 
-        activate_contact_sensors=True, 
     ), 
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
@@ -77,11 +77,3 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
         ),
     }, 
 )
-            # "joint_1": 0.0, 
-            # "joint_2": -math.pi/12, # -15
-            # "joint_3": -3*math.pi/4, # -135
-            # "joint_4": 0.0, 
-            # "joint_5": -math.pi/3, # -60
-            # "joint_6": math.pi/2, # 90
-
-            # 4* math.pi/18  2*math.pi/9,,    29*math.pi/9

@@ -1,0 +1,394 @@
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+from dataclasses import MISSING
+import math
+
+from numpy import argmin
+import isaaclab.sim as sim_utils
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg, RigidObjectCfg
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.sensors import ContactSensorCfg
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+
+from . import mdp
+
+##
+# Scene definition
+##
+
+EPISODE_LENGTH_SEC = 8.0
+DECIMATION = 3
+FREQUENCY = 50
+DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
+
+
+MARKER_CFG = VisualizationMarkersCfg(
+    markers={
+        "cuboid": sim_utils.CuboidCfg(
+            size=(0.02, 0.02, 0.02),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 0.0)),
+        ),
+    }
+)
+
+
+@configclass
+class ObjectTableSceneCfg(InteractiveSceneCfg):
+    """Configuration for the lift scene with a robot and a object.
+    This is the abstract base implementation, the exact scene is defined in the derived classes
+    which need to set the target object, robot and end-effector frames
+    """
+
+    # robots: will be populated by agent env cfg
+    robot: ArticulationCfg = MISSING
+    # end-effector sensor: will be populated by agent env cfg
+    ee_frame: FrameTransformerCfg = MISSING
+    # target object: will be populated by agent env cfg
+    object: RigidObjectCfg | DeformableObjectCfg = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
+        spawn=UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+            # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
+            scale=(0.8, 0.8, 0.8),
+            rigid_props=RigidBodyPropertiesCfg(
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+                max_angular_velocity=1000.0,
+                max_linear_velocity=1000.0,
+                max_depenetration_velocity=5.0,
+                disable_gravity=False,
+            ),
+        ),
+    )
+
+    # Table
+    table = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0, 0], rot=[1.0, 0, 0, 0]),
+        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd"),
+    )
+
+    # plane
+    plane = AssetBaseCfg(
+        prim_path="/World/GroundPlane",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.79]),
+        spawn=GroundPlaneCfg(),
+    )
+
+    # lights
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
+    )
+
+    # Contact sensors for robot
+    contact_forces_arm = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)", 
+        update_period=0.0, 
+        history_length=1, 
+        debug_vis=False, 
+    )
+    contact_forces_outer_gripper = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/(left_inner_finger|left_outer_knuckle|left_outer_finger|right_inner_finger|right_outer_knuckle|right_outer_finger)", 
+        update_period=0.0, 
+        history_length=1, 
+        debug_vis=False, 
+    )
+    contact_forces_inner_gripper = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/(left_inner_knuckle|right_inner_knuckle|gripper_base_link)", 
+        update_period=0.0, 
+        history_length=1, 
+        debug_vis=False, 
+    )
+    contact_forces_left_finger_pad = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/left_finger_pad", 
+        update_period=0.0, 
+        history_length=1, 
+        debug_vis=True, 
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
+    )
+    contact_forces_right_finger_pad = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/right_finger_pad", 
+        update_period=0.0, 
+        history_length=1, 
+        debug_vis=True, 
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
+    )
+
+
+##
+# MDP settings
+##
+
+
+@configclass
+class CommandsCfg:
+    """Command terms for the MDP."""
+
+    lift_target = mdp.UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name=MISSING,  # will be set by agent env cfg
+        resampling_time_range=(8.0, 8.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.2, 0.4), roll=(0.0, 0.0), pitch=(90.0, 90.0), yaw=(0.0, 0.0)  # pitch=(math.pi/2, math.pi/2)
+        ),
+    )
+    
+    place_target = mdp.UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name=MISSING,  # will be set by agent env cfg
+        resampling_time_range=(8.0, 8.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(90.0, 90.0), yaw=(0.0, 0.0)  # pitch=(math.pi/2, math.pi/2)
+        ),
+    )
+
+    def __post_init__(self):
+        self.lift_target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+        self.place_target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+
+        self.lift_target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
+        self.place_target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
+
+
+@configclass
+class ActionsCfg:
+    """Action specifications for the MDP."""
+
+    # will be set by agent env cfg
+    arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
+    gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
+
+
+@configclass
+class ObservationsCfg:
+    """Observation specifications for the MDP."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Observations for policy group."""
+
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
+        object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame)
+        lift_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "lift_target"})
+        place_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "place_target"})
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+
+    # observation groups
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class EventCfg:
+    """Configuration for events."""
+
+    reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+
+    reset_object_position = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+        },
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the MDP."""
+    
+    # grasping_object = RewTerm(func=mdp.object_is_grasped, weight=0.2)
+    reaching_object = RewTerm(
+        func=mdp.object_ee_distance, 
+        params={"std": 0.1}, 
+        weight=1.0,
+    )
+    grasping_object = RewTerm(
+        func=mdp.object_is_grasped,
+        weight=5.0,
+    )
+    lifting_object = RewTerm(
+        func=mdp.object_is_lifted, 
+        params={"minimal_height": 0.025, "maximal_height": 0.4}, 
+        weight=10.0,
+    )
+    object_tracking = RewTerm(
+        func=mdp.object_goal_distance,
+        params={"std": 0.3, "minimal_height": 0.025, "maximal_height": 0.4, "command_name": "lift_target"},
+        weight=16.0,
+    )
+    object_placing = RewTerm(
+        func=mdp.object_goal_distance,
+        params={"std": 0.1, "minimal_height": 0.025, "maximal_height": 0.4, "command_name": "place_target"},
+        weight=0.0,
+    )
+    object_placed = RewTerm(
+        func=mdp.object_is_placed,
+        params={"distance_threshold": 0.025, "height_threshold": 0.01},
+        weight=0.0,
+    )
+    
+    ee_alignment_penalty = RewTerm(func=mdp.world_ee_z_axis_alignment_penalty, weight=-1.0, params=MISSING)
+
+    arm_action_penalty = RewTerm(func=mdp.action_rate_penalty, params={"action_type": "arm_actions"}, weight=-0.01)
+    arm_velocity_penalty = RewTerm(func=mdp.joint_velocity_penalty, params={"joint_type": "arm_joints"}, weight=-0.01)    
+
+    gripper_action_penalty = RewTerm(func=mdp.action_rate_penalty, params={"action_type": "gripper_actions"}, weight=0.0)
+    gripper_velocity_penalty = RewTerm(func=mdp.joint_velocity_penalty, params={"joint_type": "gripper_joints"}, weight=0.0)
+
+
+
+
+
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    
+    object_dropping = DoneTerm(
+        func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
+    )
+    object_out_of_bounds = DoneTerm(
+        func=mdp.object_out_of_bounds, params={"object_cfg": SceneEntityCfg("object")}
+    )
+    arm_contact = DoneTerm(
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces_arm", body_names=["arm_base_link", "shoulder_link", 
+                                                                               "bicep_link", "forearm_link", "spherical_wrist_.*", 
+                                                                               "bracelet_with_vision_link"]), "threshold": 1.0},
+    )
+    # gripper_contact = DoneTerm(
+    #     func=mdp.illegal_contact,
+    #     params={"sensor_cfg": SceneEntityCfg("contact_forces_outer_gripper", body_names=["left_inner_finger", "left_outer_knuckle", 
+    #                                                                                      "left_outer_finger", "right_inner_finger", "right_outer_knuckle", 
+    #                                                                                      "right_outer_finger"]), "threshold": 1.0},
+    # )
+    # object_tilt = DoneTerm(
+    #     func=mdp.bad_orientation, params={"limit_angle": math.pi, "asset_cfg": SceneEntityCfg("object")}
+    # )
+
+
+@configclass
+class CurriculumCfg:
+    """Curriculum terms for the MDP."""
+
+    ee_alignment_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -3.0, "num_steps": 12500}
+    )
+    arm_action_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.1, "num_steps": 12500}
+    )
+    gripper_action_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.02, "num_steps": 12500}
+    )
+    arm_velocity_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.1, "num_steps": 12500}
+    )
+    gripper_velocity_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.01, "num_steps": 12500}
+    )
+
+    ee_alignment_penalty2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -10.0, "num_steps": 25000}
+    )
+    arm_action_penalty2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -2.0, "num_steps": 25000}
+    )
+    gripper_action_penalty2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.4, "num_steps": 25000}
+    )
+    arm_velocity_penalty2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -2.0, "num_steps": 25000}
+    )
+    gripper_velocity_penalty2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.2, "num_steps": 25000}
+    )
+
+
+    # object_placing = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "object_placing", "weight": 18.0, "num_steps": 25000}
+    # )
+    # object_placed = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "object_placed", "weight": 20.0, "num_steps": 25000}
+    # )
+    # joint_acc = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "joint_acc", "weight": -0.001, "num_steps": 10000}
+    # )
+    # joint_torque = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "joint_torque", "weight": -0.001, "num_steps": 10000}
+    # )
+    # world_ee_z_axis_alignment_penalty = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "world_ee_z_axis_alignment_penalty", "weight": -1.0, "num_steps": 10000}
+    # )
+    # object_world_z_axis_alignment_penalty = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "object_world_z_axis_alignment_penalty", "weight": -1.0, "num_steps": 10000}
+    # )
+
+
+##
+# Environment configuration
+##
+
+
+@configclass
+class PickAndPlaceEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the lifting environment."""
+
+    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=4096, env_spacing=2.0)
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    commands: CommandsCfg = CommandsCfg()
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    events: EventCfg = EventCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
+
+    def __post_init__(self):
+        """Post initialization."""
+
+        self.episode_length_s = EPISODE_LENGTH_SEC
+        self.decimation = DECIMATION
+        self.sim.dt = DELTA_TIME
+        self.sim.render_interval = self.decimation
+
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        self.sim.physx.bounce_threshold_velocity = 0.01
+        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
+        self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
+        self.sim.physx.friction_correlation_distance = 0.00625
+
+        self.scene.contact_forces_arm.update_period = self.sim.dt
+        self.scene.contact_forces_outer_gripper.update_period = self.sim.dt
+        self.scene.contact_forces_inner_gripper.update_period = self.sim.dt
+        self.scene.contact_forces_arm.history_length = self.decimation
+        self.scene.contact_forces_outer_gripper.history_length = self.decimation
+        self.scene.contact_forces_inner_gripper.history_length = self.decimation

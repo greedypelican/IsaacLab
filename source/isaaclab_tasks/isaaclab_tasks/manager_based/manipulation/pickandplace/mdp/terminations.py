@@ -12,45 +12,48 @@ the termination introduced by the function.
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING
 
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
-
-if TYPE_CHECKING:
-    from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.envs import ManagerBasedRLEnv
 
 
-def object_reached_goal(
-    env: ManagerBasedRLEnv,
-    command_name: str = "object_pose",
-    threshold: float = 0.02,
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-) -> torch.Tensor:
-    """Termination condition for the object reaching the goal position.
-
+def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Time out termination with phase metrics logging.
+    
+    This function performs time out termination and logs phase metrics to extras.
+    
     Args:
         env: The environment.
-        command_name: The name of the command that is used to control the object.
-        threshold: The threshold for the object to reach the goal position. Defaults to 0.02.
-        robot_cfg: The robot configuration. Defaults to SceneEntityCfg("robot").
-        object_cfg: The object configuration. Defaults to SceneEntityCfg("object").
-
+        
+    Returns:
+        Boolean tensor indicating which environments should terminate (True = terminate).
     """
-    # extract the used quantities (to enable type-hinting)
-    robot: RigidObject = env.scene[robot_cfg.name]
-    object: RigidObject = env.scene[object_cfg.name]
-    command = env.command_manager.get_command(command_name)
-    # compute the desired position in the world frame
-    des_pos_b = command[:, :3]
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_pos_w, robot.data.root_quat_w, des_pos_b)
-    # distance of the end-effector to the object: (num_envs,)
-    distance = torch.norm(des_pos_w - object.data.root_pos_w[:, :3], dim=1)
-
-    # rewarded if the object is lifted above the threshold
-    return distance < threshold
+    # Import here to avoid circular imports
+    from .events import phase_flags
+    
+    # Check time out condition (same as original time_out function)
+    time_out_condition = env.episode_length_buf >= env.max_episode_length
+    
+    # Log phase metrics when time out occurs
+    if phase_flags and torch.any(time_out_condition):
+        # Ensure extras and log exist
+        if not hasattr(env, 'extras'):
+            env.extras = {}
+        if "log" not in env.extras:
+            env.extras["log"] = {}
+        
+        # Add phase metrics to extras["log"]
+        env.extras["log"]["Phases/phase_0_count"] = torch.sum(~phase_flags["phase1_complete"]).item()
+        env.extras["log"]["Phases/phase_1_count"] = torch.sum(phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]).item()
+        env.extras["log"]["Phases/phase_2_count"] = torch.sum(phase_flags["phase2_complete"]).item()
+        
+        # Debug print
+        # print(f"Phase metrics logged: phase0={env.extras['log']['Metrics/phase_0_count']}, phase1={env.extras['log']['Metrics/phase_1_count']}, phase2={env.extras['log']['Metrics/phase_2_count']}")
+    
+    # Return the actual time out condition
+    return time_out_condition
 
 
 def object_out_of_bounds(
@@ -92,44 +95,69 @@ def object_out_of_bounds(
     return out_of_bounds
 
 
-def illegal_contact_excluding_bodies(
-    env: ManagerBasedRLEnv, 
-    threshold: float, 
-    sensor_cfg: SceneEntityCfg,
-    exclude_body_names: list[str] = []
+# Global variable to track previous grasping state
+_prev_grasped_above_threshold = {}
+
+def object_dropped(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    height_threshold: float = 0.025,
+    force_threshold: float = 1.0,
 ) -> torch.Tensor:
-    """Terminate when the contact force on the sensor exceeds the force threshold, excluding specified bodies.
+    """Terminate when object is dropped (contact lost while object is above height threshold).
+    
+    This function detects when an object that was previously grasped and lifted
+    loses contact with both fingers, indicating it was dropped.
     
     Args:
         env: The environment.
-        threshold: Force threshold for termination.
-        sensor_cfg: Contact sensor configuration.
-        exclude_body_names: List of body names to exclude from contact detection. 
-                           Defaults to None (no exclusions).
+        object_cfg: Object asset configuration.
+        height_threshold: Height threshold above which dropping is considered.
+        force_threshold: Force threshold for contact detection.
     
     Returns:
         Boolean tensor indicating which environments should terminate (True = terminate).
     """
-    # extract the used quantities (to enable type-hinting)
-    contact_sensor = env.scene.sensors[sensor_cfg.name]
-    net_contact_forces = contact_sensor.data.net_forces_w_history
+    global _prev_grasped_above_threshold
     
-    # If no exclusions specified, use all bodies
-    if exclude_body_names is None:
-        body_ids = sensor_cfg.body_ids
-    else:
-        # Get body names from the sensor configuration
-        all_body_names = sensor_cfg.body_names
-        if all_body_names is None:
-            # Fallback to using all body IDs if body_names is not available
-            body_ids = sensor_cfg.body_ids
-        else:
-            # Filter out excluded body names
-            filtered_body_names = [name for name in all_body_names if name not in exclude_body_names]
-            # Get body IDs for filtered names
-            body_ids = [i for i, name in enumerate(all_body_names) if name in filtered_body_names]
+    # Get object height
+    object: RigidObject = env.scene[object_cfg.name]
+    object_height = object.data.root_pos_w[:, 2]
     
-    # check if any contact force exceeds the threshold
-    return torch.any(
-        torch.max(torch.norm(net_contact_forces[:, :, body_ids], dim=-1), dim=1)[0] > threshold, dim=1
-    )
+    # Get contact sensors
+    left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
+    right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
+    
+    # Calculate contact forces
+    left_forces = left_finger_sensor.data.force_matrix_w
+    right_forces = right_finger_sensor.data.force_matrix_w
+    
+    left_forces_sum = torch.sum(left_forces, dim=(1, 2))
+    right_forces_sum = torch.sum(right_forces, dim=(1, 2))
+    left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
+    right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
+    
+    # Check if both fingers are in contact
+    left_contact = (left_force_magnitudes > force_threshold)
+    right_contact = (right_force_magnitudes > force_threshold)
+    both_contact = left_contact & right_contact
+    
+    # Check if object is above height threshold
+    above_threshold = object_height > height_threshold
+    
+    # Initialize or get previous state
+    if env.num_envs not in _prev_grasped_above_threshold:
+        _prev_grasped_above_threshold[env.num_envs] = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Update previous state: was grasped and above threshold
+    prev_grasped_above_threshold = _prev_grasped_above_threshold[env.num_envs].clone()
+    _prev_grasped_above_threshold[env.num_envs] = above_threshold & both_contact
+    
+    # Object is dropped if:
+    # 1. Previously was grasped and above threshold
+    # 2. Currently above threshold but not grasped
+    object_dropped = prev_grasped_above_threshold & above_threshold & ~both_contact
+    
+    return object_dropped
+
+

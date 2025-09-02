@@ -6,15 +6,14 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING
 
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms, quat_mul
+from isaaclab.envs import ManagerBasedRLEnv
 
-if TYPE_CHECKING:
-    from isaaclab.envs import ManagerBasedRLEnv
-
+# Import phase_flags from events module
+from .events import phase_flags
 
 def object_position_in_robot_root_frame(
     env: ManagerBasedRLEnv,
@@ -50,3 +49,26 @@ def object_orientation_in_robot_root_frame(
     object_quat_b = quat_mul(quat_mul(robot_quat_w_inv, object_quat_w), robot_quat_w)
     
     return object_quat_b
+
+
+def current_phase(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Return the current phase information for the agent to observe.
+    
+    Returns:
+        Tensor with shape (num_envs, 1) containing phase information:
+        0.0: pick phase (아직 phase1_complete가 False)
+        1.0: move phase (phase1_complete가 True, phase2_complete가 False)
+        2.0: place phase (phase2_complete가 True)
+    """
+    # Phase flags가 초기화되지 않았으면 기본값 반환
+    if not phase_flags or "phase1_complete" not in phase_flags:
+        return torch.zeros(env.num_envs, 1, device=env.device)
+
+    # Phase flags를 기반으로 현재 phase 계산
+    phase = torch.zeros(env.num_envs, 1, device=env.device)
+    phase[phase_flags["phase1_complete"]] = 1.0
+    phase[phase_flags["phase2_complete"]] = 2.0
+    
+    return phase

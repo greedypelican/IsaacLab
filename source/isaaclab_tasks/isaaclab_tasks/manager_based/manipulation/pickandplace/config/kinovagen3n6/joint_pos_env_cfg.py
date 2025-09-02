@@ -54,8 +54,8 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
                                 "left_outer_knuckle_joint": math.pi/4, "right_outer_knuckle_joint": math.pi/4}, 
         )
         # Set the body name for the end effector
-        self.commands.lift_target.body_name = "gripper_base_link"
-        self.commands.place_target.body_name = "gripper_base_link"
+        self.commands.ascend.body_name = "gripper_base_link"
+        self.commands.descend.body_name = "gripper_base_link"
         # self.commands.object_pose.debug_vis = False
         
         # Listens to the required transforms

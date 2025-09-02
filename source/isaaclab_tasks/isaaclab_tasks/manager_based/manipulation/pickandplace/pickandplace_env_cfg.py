@@ -28,11 +28,12 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from . import mdp
 
+
 ##
 # Scene definition
 ##
 
-EPISODE_LENGTH_SEC = 8.0
+EPISODE_LENGTH_SEC = 10.0
 DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
@@ -55,11 +56,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     which need to set the target object, robot and end-effector frames
     """
 
-    # robots: will be populated by agent env cfg
     robot: ArticulationCfg = MISSING
-    # end-effector sensor: will be populated by agent env cfg
     ee_frame: FrameTransformerCfg = MISSING
-    # target object: will be populated by agent env cfg
     object: RigidObjectCfg | DeformableObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
@@ -77,28 +75,20 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
             ),
         ),
     )
-
-    # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0, 0], rot=[1.0, 0, 0, 0]),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, 0], rot=[1.0, 0, 0, 0]),
         spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd"),
     )
-
-    # plane
     plane = AssetBaseCfg(
         prim_path="/World/GroundPlane",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.79]),
         spawn=GroundPlaneCfg(),
     )
-
-    # lights
     light = AssetBaseCfg(
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
-
-    # Contact sensors for robot
     contact_forces_arm = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)", 
         update_period=0.0, 
@@ -142,39 +132,36 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command terms for the MDP."""
 
-    lift_target = mdp.UniformPoseCommandCfg(
-        asset_name="robot",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(8.0, 8.0),
-        debug_vis=True,
+    ascend = mdp.UniformPoseCommandCfg(
+        asset_name="robot", 
+        body_name=MISSING, 
+        resampling_time_range=(8.0, 8.0), 
+        debug_vis=True, 
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.2, 0.4), roll=(0.0, 0.0), pitch=(90.0, 90.0), yaw=(0.0, 0.0)  # pitch=(math.pi/2, math.pi/2)
-        ),
+            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.2, 0.4), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
+        ), 
     )
-    
-    place_target = mdp.UniformPoseCommandCfg(
-        asset_name="robot",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(8.0, 8.0),
-        debug_vis=True,
+    descend = mdp.UniformPoseCommandCfg(
+        asset_name="robot", 
+        body_name=MISSING, 
+        resampling_time_range=(8.0, 8.0), 
+        debug_vis=True, 
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(90.0, 90.0), yaw=(0.0, 0.0)  # pitch=(math.pi/2, math.pi/2)
-        ),
+            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
+        ), 
     )
 
     def __post_init__(self):
-        self.lift_target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-        self.place_target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-
-        self.lift_target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
-        self.place_target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
+        self.ascend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+        self.ascend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
+        self.descend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+        self.descend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
 
 
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    # will be set by agent env cfg
     arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
     gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
 
@@ -191,8 +178,9 @@ class ObservationsCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
         object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame)
-        lift_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "lift_target"})
-        place_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "place_target"})
+        lift_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
+        place_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
+        current_phase = ObsTerm(func=mdp.current_phase)
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
@@ -207,16 +195,28 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
-    reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
-
+    reset_all = EventTerm(
+        func=mdp.reset_scene_to_default, 
+        mode="reset", 
+    )
     reset_object_position = EventTerm(
-        func=mdp.reset_root_state_uniform,
-        mode="reset",
+        func=mdp.reset_root_state_uniform, 
+        mode="reset", 
         params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
-            "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)}, 
+            "velocity_range": {}, 
+            "asset_cfg": SceneEntityCfg("object", body_names="Object"), 
         },
+    )
+    reset_phase_flags = EventTerm(
+        func=mdp.reset_phase_flags, 
+        mode="reset", 
+    )
+    check_and_update_phase_flags = EventTerm(
+        func=mdp.check_and_update_phase_flags, 
+        mode="interval", 
+        interval_range_s=(0.02, 0.02), 
+        is_global_time=False, 
     )
 
 
@@ -225,76 +225,88 @@ class RewardsCfg:
     """Reward terms for the MDP."""
     
     # grasping_object = RewTerm(func=mdp.object_is_grasped, weight=0.2)
-    reaching_object = RewTerm(
-        func=mdp.object_ee_distance, 
+    distance = RewTerm(
+        func=mdp.ee_object_distance, 
         params={"std": 0.1}, 
-        weight=1.0,
+        weight=1.0, 
     )
-    grasping_object = RewTerm(
-        func=mdp.object_is_grasped,
-        weight=5.0,
+    contact = RewTerm(
+        func=mdp.object_is_grasped, 
+        params={"force_threshold": 1.0}, 
+        weight=5.0, 
     )
-    lifting_object = RewTerm(
-        func=mdp.object_is_lifted, 
-        params={"minimal_height": 0.025, "maximal_height": 0.4}, 
-        weight=10.0,
+    height = RewTerm(
+        func=mdp.object_height, 
+        params={"height_threshold": 0.025}, 
+        weight=10.0, 
     )
-    object_tracking = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.3, "minimal_height": 0.025, "maximal_height": 0.4, "command_name": "lift_target"},
-        weight=16.0,
+    tracking = RewTerm(
+        func=mdp.object_goal_pos, 
+        params={"std": 0.5}, 
+        weight=16.0, 
     )
-    object_placing = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.1, "minimal_height": 0.025, "maximal_height": 0.4, "command_name": "place_target"},
-        weight=0.0,
+    fine_tracking = RewTerm(
+        func=mdp.object_goal_pos, 
+        params={"std": 0.2}, 
+        weight=5.0, 
     )
-    object_placed = RewTerm(
-        func=mdp.object_is_placed,
-        params={"distance_threshold": 0.025, "height_threshold": 0.01},
-        weight=0.0,
-    )
+    # placed = RewTerm(
+    #     func=mdp.object_is_placed, 
+    #     params={"distance_threshold": 0.025, "height_threshold": 0.01}, 
+    #     weight=0.0, 
+    # )
     
-    ee_alignment_penalty = RewTerm(func=mdp.world_ee_z_axis_alignment_penalty, weight=-1.0, params=MISSING)
-
-    arm_action_penalty = RewTerm(func=mdp.action_rate_penalty, params={"action_type": "arm_actions"}, weight=-0.01)
-    arm_velocity_penalty = RewTerm(func=mdp.joint_velocity_penalty, params={"joint_type": "arm_joints"}, weight=-0.01)    
-
-    gripper_action_penalty = RewTerm(func=mdp.action_rate_penalty, params={"action_type": "gripper_actions"}, weight=0.0)
-    gripper_velocity_penalty = RewTerm(func=mdp.joint_velocity_penalty, params={"joint_type": "gripper_joints"}, weight=0.0)
-
-
-
-
+    ee_alignment_penalty = RewTerm(
+        func=mdp.world_ee_z_axis_alignment_penalty, 
+        params=MISSING, 
+        weight=-1.0, 
+    )
+    arm_action_penalty = RewTerm(
+        func=mdp.action_rate_penalty, 
+        params={"action_type": "arm_actions"}, 
+        weight=-0.1,   # -0.01
+    )
+    arm_velocity_penalty = RewTerm(
+        func=mdp.joint_velocity_penalty, 
+        params={"joint_type": "arm_joints"}, 
+        weight=-0.1, 
+    )    
+    gripper_action_penalty = RewTerm(
+        func=mdp.action_rate_penalty, 
+        params={"action_type": "gripper_actions"}, 
+        weight=0.0,   # -0.01
+    )
+    gripper_velocity_penalty = RewTerm(
+        func=mdp.joint_velocity_penalty, 
+        params={"joint_type": "gripper_joints"}, 
+        weight=0.0,   # -0.01
+    )
 
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
 
-    time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    
+    time_out = DoneTerm(
+        func=mdp.time_out_with_phase_logging, 
+        time_out=True, 
+    )
+
     object_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
+        func=mdp.object_dropped, 
+        params={"height_threshold": 0.025, "force_threshold": 1.0}, 
     )
     object_out_of_bounds = DoneTerm(
-        func=mdp.object_out_of_bounds, params={"object_cfg": SceneEntityCfg("object")}
+        func=mdp.object_out_of_bounds, 
+        params={"object_cfg": SceneEntityCfg("object")}, 
     )
     arm_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces_arm", body_names=["arm_base_link", "shoulder_link", 
-                                                                               "bicep_link", "forearm_link", "spherical_wrist_.*", 
-                                                                               "bracelet_with_vision_link"]), "threshold": 1.0},
+        func=mdp.illegal_contact, 
+        params={"sensor_cfg": SceneEntityCfg("contact_forces_arm", 
+                                  body_names=["arm_base_link", "shoulder_link", "bicep_link", 
+                                      "forearm_link", "spherical_wrist_.*", "bracelet_with_vision_link"]), 
+                "threshold": 1.0}, 
     )
-    # gripper_contact = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces_outer_gripper", body_names=["left_inner_finger", "left_outer_knuckle", 
-    #                                                                                      "left_outer_finger", "right_inner_finger", "right_outer_knuckle", 
-    #                                                                                      "right_outer_finger"]), "threshold": 1.0},
-    # )
-    # object_tilt = DoneTerm(
-    #     func=mdp.bad_orientation, params={"limit_angle": math.pi, "asset_cfg": SceneEntityCfg("object")}
-    # )
 
 
 @configclass
@@ -334,26 +346,6 @@ class CurriculumCfg:
     )
 
 
-    # object_placing = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "object_placing", "weight": 18.0, "num_steps": 25000}
-    # )
-    # object_placed = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "object_placed", "weight": 20.0, "num_steps": 25000}
-    # )
-    # joint_acc = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "joint_acc", "weight": -0.001, "num_steps": 10000}
-    # )
-    # joint_torque = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "joint_torque", "weight": -0.001, "num_steps": 10000}
-    # )
-    # world_ee_z_axis_alignment_penalty = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "world_ee_z_axis_alignment_penalty", "weight": -1.0, "num_steps": 10000}
-    # )
-    # object_world_z_axis_alignment_penalty = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "object_world_z_axis_alignment_penalty", "weight": -1.0, "num_steps": 10000}
-    # )
-
-
 ##
 # Environment configuration
 ##
@@ -370,7 +362,7 @@ class PickAndPlaceEnvCfg(ManagerBasedRLEnvCfg):
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
-    curriculum: CurriculumCfg = CurriculumCfg()
+    # curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
         """Post initialization."""

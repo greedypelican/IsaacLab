@@ -239,13 +239,13 @@ class RewardsCfg:
     )
     tracking = RewTerm(
         func=mdp.object_goal_pos, 
-        params={"std": 0.3}, 
-        weight=3.0, 
+        params={"std": 0.5}, 
+        weight=16.0, 
     )
     fine_tracking = RewTerm(
         func=mdp.object_goal_pos, 
-        params={"std": 0.1}, 
-        weight=3.0, 
+        params={"std": 0.2}, 
+        weight=5.0, 
     )
     # placed = RewTerm(
     #     func=mdp.object_is_placed, 

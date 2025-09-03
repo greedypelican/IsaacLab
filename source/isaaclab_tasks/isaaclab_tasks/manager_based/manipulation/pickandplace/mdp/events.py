@@ -28,11 +28,13 @@ def reset_phase_flags(
         phase_flags["phase1_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase2_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase3_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
+        phase_flags["phase4_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
     
     # 특정 환경들만 리셋
     phase_flags["phase1_complete"][env_ids] = False
     phase_flags["phase2_complete"][env_ids] = False
     phase_flags["phase3_complete"][env_ids] = False
+    phase_flags["phase4_complete"][env_ids] = False
 
 
 def check_and_update_phase_flags(
@@ -46,9 +48,10 @@ def check_and_update_phase_flags(
     robot: RigidObject = env.scene[robot_cfg.name]
     left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
     right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
+    ee_frame: FrameTransformer = env.scene["ee_frame"]
     object: RigidObject = env.scene[object_cfg.name]
-    command_1 = env.command_manager.get_command("ascend")
-    command_2 = env.command_manager.get_command("descend")
+    ascend_command = env.command_manager.get_command("ascend")
+    descend_command = env.command_manager.get_command("descend")
 
     # contact sensor of fingers (env_ids에 해당하는 환경들만)
     left_forces = left_finger_sensor.data.force_matrix_w[env_ids]
@@ -61,30 +64,30 @@ def check_and_update_phase_flags(
     right_contact = (right_force_magnitudes > 1.0)
     grasping = left_contact & right_contact
 
-    # distance between object and pick command (env_ids에 해당하는 환경들만)
-    des_pos_b_1 = command_1[env_ids, :3]
-    des_pos_w_1, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_1)
-    distance_1 = torch.norm(des_pos_w_1 - object.data.root_pos_w[env_ids], dim=1)
-
-    des_pos_b_2 = command_2[env_ids, :3]
-    des_pos_w_2, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_2)
-    distance_2 = torch.norm(des_pos_w_2 - object.data.root_pos_w[env_ids], dim=1)
-
-    # phase1_condition과 phase2_condition은 env_ids 크기와 동일
-    phase1_condition = (distance_1 < 0.03) & grasping
+    # Phase 1: ee_frame과 object가 가깝고 grasping 상태
+    ee_pos = ee_frame.data.target_pos_w[env_ids, 0, :]  # ee position
+    object_pos = object.data.root_pos_w[env_ids]
+    distance_ee_object = torch.norm(ee_pos - object_pos, dim=1)
+    phase1_condition = (distance_ee_object < 0.03) & grasping
     phase_flags["phase1_complete"][env_ids] = phase_flags["phase1_complete"][env_ids] | phase1_condition
 
-    # phase2_condition: phase1이 완료되고, distance2가 가깝고, grasping 상태
-    phase2_condition = (distance_2 < 0.03) & grasping
+    # Phase 2: object가 ascend command와 가깝고 grasping 상태
+    des_pos_b_ascend = ascend_command[env_ids, :3]
+    des_pos_w_ascend, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_ascend)
+    distance_ascend = torch.norm(des_pos_w_ascend - object_pos, dim=1)
+    phase2_condition = (distance_ascend < 0.03) & grasping
     # phase1이 완료된 환경들에서만 phase2 업데이트
     phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (phase2_condition & phase_flags["phase1_complete"][env_ids])
 
+    # Phase 3: object가 descend command와 가깝고 grasping 상태
+    des_pos_b_descend = descend_command[env_ids, :3]
+    des_pos_w_descend, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_descend)
+    distance_descend = torch.norm(des_pos_w_descend - object_pos, dim=1)
+    phase3_condition = (distance_descend < 0.03) & grasping
+    # phase2가 완료된 환경들에서만 phase3 업데이트
+    phase_flags["phase3_complete"][env_ids] = phase_flags["phase3_complete"][env_ids] | (phase3_condition & phase_flags["phase2_complete"][env_ids])
 
-def log_phase_metrics(env: ManagerBasedRLEnv, env_ids: torch.Tensor):
-    """Log phase metrics to environment extras."""
-    if not phase_flags:
-        return
-    
-    env.extras["Metrics/phase_0_count"] = torch.sum(~phase_flags["phase1_complete"]).item()
-    env.extras["Metrics/phase_1_count"] = torch.sum(phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]).item()
-    env.extras["Metrics/phase_2_count"] = torch.sum(phase_flags["phase2_complete"]).item()
+    # Phase 4: object가 descend command와 가깝고 release 상태
+    phase4_condition = (distance_descend < 0.03) & ~grasping  # grasping 해제
+    # phase3가 완료된 환경들에서만 phase4 업데이트
+    phase_flags["phase4_complete"][env_ids] = phase_flags["phase4_complete"][env_ids] | (phase4_condition & phase_flags["phase3_complete"][env_ids])

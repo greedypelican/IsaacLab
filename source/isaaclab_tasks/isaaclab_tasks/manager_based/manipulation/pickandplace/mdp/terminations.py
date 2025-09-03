@@ -18,6 +18,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab.envs import ManagerBasedRLEnv
 
+from .events import phase_flags
 
 def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Time out termination with phase metrics logging.
@@ -98,7 +99,7 @@ def object_out_of_bounds(
 def object_dropped(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    height_threshold: float = 0.025,
+    height_threshold: float = 0.05,
     force_threshold: float = 1.0,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
@@ -112,6 +113,10 @@ def object_dropped(
     Returns:
         Boolean tensor indicating which environments should terminate (True = terminate).
     """
+    # Check if phase_flags is initialized
+    if not phase_flags or "phase1_complete" not in phase_flags:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
     # Get object height
     object: RigidObject = env.scene[object_cfg.name]
     object_height = object.data.root_pos_w[:, 2]
@@ -135,9 +140,10 @@ def object_dropped(
     both_contact = left_contact & right_contact
     
     # Object is dropped if:
-    # 1. Object is above height threshold (was lifted)
-    # 2. Both fingers lost contact (grasping failed)
-    object_dropped = (object_height > height_threshold) & ~both_contact
+    # 1. phase1_complete is True (object was successfully grasped)
+    # 2. Object is above height threshold (was lifted)
+    # 3. Both fingers lost contact (grasping failed after success)
+    object_dropped = phase_flags["phase1_complete"] & (object_height > height_threshold) & ~both_contact
     
     return object_dropped
 

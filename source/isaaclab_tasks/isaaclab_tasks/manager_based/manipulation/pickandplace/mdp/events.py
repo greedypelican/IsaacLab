@@ -33,11 +33,6 @@ def reset_phase_flags(
     phase_flags["phase1_complete"][env_ids] = False
     phase_flags["phase2_complete"][env_ids] = False
     phase_flags["phase3_complete"][env_ids] = False
-    
-    # Reset object dropping tracking for reset environments
-    from .terminations import _prev_grasped_above_threshold
-    if env.num_envs in _prev_grasped_above_threshold:
-        _prev_grasped_above_threshold[env.num_envs][env_ids] = False
 
 
 def check_and_update_phase_flags(
@@ -76,11 +71,11 @@ def check_and_update_phase_flags(
     distance_2 = torch.norm(des_pos_w_2 - object.data.root_pos_w[env_ids], dim=1)
 
     # phase1_condition과 phase2_condition은 env_ids 크기와 동일
-    phase1_condition = (distance_1 < 0.05) & grasping
+    phase1_condition = (distance_1 < 0.03) & grasping
     phase_flags["phase1_complete"][env_ids] = phase_flags["phase1_complete"][env_ids] | phase1_condition
 
     # phase2_condition: phase1이 완료되고, distance2가 가깝고, grasping 상태
-    phase2_condition = (distance_2 < 0.05) & grasping
+    phase2_condition = (distance_2 < 0.03) & grasping
     # phase1이 완료된 환경들에서만 phase2 업데이트
     phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (phase2_condition & phase_flags["phase1_complete"][env_ids])
 

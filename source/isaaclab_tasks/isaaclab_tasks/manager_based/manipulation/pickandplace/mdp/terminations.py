@@ -95,9 +95,6 @@ def object_out_of_bounds(
     return out_of_bounds
 
 
-# Global variable to track previous grasping state
-_prev_grasped_above_threshold = {}
-
 def object_dropped(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
@@ -105,9 +102,6 @@ def object_dropped(
     force_threshold: float = 1.0,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
-    
-    This function detects when an object that was previously grasped and lifted
-    loses contact with both fingers, indicating it was dropped.
     
     Args:
         env: The environment.
@@ -118,8 +112,6 @@ def object_dropped(
     Returns:
         Boolean tensor indicating which environments should terminate (True = terminate).
     """
-    global _prev_grasped_above_threshold
-    
     # Get object height
     object: RigidObject = env.scene[object_cfg.name]
     object_height = object.data.root_pos_w[:, 2]
@@ -142,21 +134,10 @@ def object_dropped(
     right_contact = (right_force_magnitudes > force_threshold)
     both_contact = left_contact & right_contact
     
-    # Check if object is above height threshold
-    above_threshold = object_height > height_threshold
-    
-    # Initialize or get previous state
-    if env.num_envs not in _prev_grasped_above_threshold:
-        _prev_grasped_above_threshold[env.num_envs] = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    
-    # Update previous state: was grasped and above threshold
-    prev_grasped_above_threshold = _prev_grasped_above_threshold[env.num_envs].clone()
-    _prev_grasped_above_threshold[env.num_envs] = above_threshold & both_contact
-    
     # Object is dropped if:
-    # 1. Previously was grasped and above threshold
-    # 2. Currently above threshold but not grasped
-    object_dropped = prev_grasped_above_threshold & above_threshold & ~both_contact
+    # 1. Object is above height threshold (was lifted)
+    # 2. Both fingers lost contact (grasping failed)
+    object_dropped = (object_height > height_threshold) & ~both_contact
     
     return object_dropped
 

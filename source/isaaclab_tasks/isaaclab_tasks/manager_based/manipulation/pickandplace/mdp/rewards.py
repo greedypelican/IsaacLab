@@ -84,15 +84,17 @@ def object_is_grasped(
     is_place_phase = phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
     
     # 벡터화된 reward 계산
-    # Pick/Move phase: grasping 장려/유지
+    # Pick phase: grasping 장려
     pick_move_reward = torch.where(left_contact & right_contact, 1.0, 
-                                  torch.where(left_contact | right_contact, 0.5, 0.0))
+                             torch.where(left_contact | right_contact, 0.5, 0.0))
     
     # Place phase: grasping 해제 장려
-    place_reward = torch.where(~(left_contact | right_contact), 1.0, 0.1)
+    place_reward = torch.where(~(left_contact & right_contact), 1.0, 
+                             torch.where(left_contact | right_contact, 0.5, 0.0))
     
     # phase에 따라 reward 선택
-    reward = torch.where(is_place_phase, place_reward, pick_move_reward)
+    reward = torch.where(is_place_phase, place_reward,
+                torch.where(is_move_phase, pick_move_reward*2, pick_move_reward))
     
     return reward
 
@@ -124,6 +126,9 @@ def object_height(
     
     # phase에 따라 reward 선택
     reward = torch.where(is_place_phase, place_reward, pick_move_reward)
+
+    reward = torch.where(is_place_phase, place_reward,
+                torch.where(is_move_phase, 0.0, pick_move_reward))
     
     return reward
 
@@ -140,12 +145,12 @@ def object_goal_pos(
     - Move phase (phase1_complete가 True, phase2_complete가 False): descend command tracking  
     - Place phase (phase2_complete가 True): 낮은 reward (place 완료 후)
     """
-
+    
     # 각 환경별로 phase 상태 확인
     is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
     is_move_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
     is_place_phase = phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-
+    
     # extract the used quantities (to enable type-hinting)
     robot: RigidObject = env.scene[robot_cfg.name]
     object: RigidObject = env.scene[object_cfg.name]
@@ -166,13 +171,10 @@ def object_goal_pos(
     target_height = des_pos_w[:, 2] # Get height from command
     height_diff = torch.abs(object.data.root_pos_w[:, 2] - target_height)
     
-    # Pick phase: tracking reward 0.0 (reach에 집중)
-    # Move phase: 기본 tracking reward
-    # Place phase: 높은 tracking reward (목표 위치 도달에 집중)
     base_reward = 1 - torch.tanh((distance + height_diff) / std)
-    reward = torch.where(is_pick_phase, 0.0,
-                torch.where(is_place_phase, base_reward * 1.5,  # place phase: 2배 증폭
-                           base_reward))  # move phase: 기본
+    reward = torch.where(is_pick_phase, 0.0, 
+                torch.where(is_move_phase, base_reward * 1.5, 
+                           base_reward))
     
     return reward
 

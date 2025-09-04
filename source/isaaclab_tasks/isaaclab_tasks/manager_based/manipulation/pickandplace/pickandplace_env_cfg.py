@@ -29,7 +29,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from . import mdp
 
 
-EPISODE_LENGTH_SEC = 8.0
+EPISODE_LENGTH_SEC = 10.0
 DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
@@ -135,7 +135,7 @@ class CommandsCfg:
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC), 
         debug_vis=True, 
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.2, 0.4), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.3, 0.3), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
         ), 
     )
     descend = mdp.UniformPoseCommandCfg(
@@ -144,7 +144,7 @@ class CommandsCfg:
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC), 
         debug_vis=True, 
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.25, 0.25), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.013, 0.013), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
         ), 
     )
 
@@ -221,37 +221,42 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
     
-    # grasping_object = RewTerm(func=mdp.object_is_grasped, weight=0.2)
+    # Phase-based basic rewards for task progression
+    phase = RewTerm(
+        func=mdp.phase_complete, 
+        weight=1.0, 
+    )
+    
     distance = RewTerm(
-        func=mdp.ee_object_distance, 
+        func=mdp.ee_distance, 
         params={"std": 0.1}, 
         weight=1.0, 
     )
     contact = RewTerm(
-        func=mdp.object_is_grasped, 
-        params={"force_threshold": 1.0}, 
-        weight=5.0, 
+        func=mdp.object_contact, 
+        params={"grasp_force": 1.0, "release_force": 0.01}, 
+        weight=2.0, 
     )
     height = RewTerm(
         func=mdp.object_height, 
-        params={"height_threshold": 0.025}, 
-        weight=10.0, 
+        params={"ascend_height": 0.03, "descend_height": 0.05}, 
+        weight=3.0, 
     )
     tracking = RewTerm(
-        func=mdp.object_goal_pos, 
-        params={"std": 0.5}, 
-        weight=16.0, 
-    )
-    fine_tracking = RewTerm(
-        func=mdp.object_goal_pos, 
-        params={"std": 0.2}, 
+        func=mdp.object_pos, 
+        params={"std": 0.3}, 
         weight=5.0, 
     )
-    # placed = RewTerm(
-    #     func=mdp.object_is_placed, 
-    #     params={"distance_threshold": 0.025, "height_threshold": 0.01}, 
-    #     weight=0.0, 
+    # fine_tracking = RewTerm(
+    #     func=mdp.object_pos, 
+    #     params={"std": 0.2}, 
+    #     weight=2.0, 
     # )
+    placed = RewTerm(
+        func=mdp.object_placement, 
+        params={"distance_threshold": 0.02, "height_threshold": 0.01}, 
+        weight=15.0, 
+    )
     
     ee_alignment_penalty = RewTerm(
         func=mdp.world_ee_z_axis_alignment_penalty, 
@@ -261,22 +266,22 @@ class RewardsCfg:
     arm_action_penalty = RewTerm(
         func=mdp.action_rate_penalty, 
         params={"action_type": "arm_actions"}, 
-        weight=-0.09,   # -0.01
+        weight=-0.07, 
     )
     arm_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty, 
         params={"joint_type": "arm_joints"}, 
-        weight=-0.09, 
+        weight=-0.07, 
     )    
     gripper_action_penalty = RewTerm(
         func=mdp.action_rate_penalty, 
         params={"action_type": "gripper_actions"}, 
-        weight=-0.0,   # -0.01
+        weight=-0.0, 
     )
     gripper_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty, 
         params={"joint_type": "gripper_joints"}, 
-        weight=-0.0,   # -0.01
+        weight=-0.0, 
     )
 
 
@@ -290,8 +295,8 @@ class TerminationsCfg:
     )
 
     object_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, 
-        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}, 
+        func=mdp.object_drop, 
+        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05, "force_threshold": 0.01}, 
     )
     object_out_of_bounds = DoneTerm(
         func=mdp.object_out_of_bounds, 
@@ -310,15 +315,15 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    # ee_alignment_penalty1 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -2.5, "num_steps": 25000}
-    # )
-    # arm_action_penalty1 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.3, "num_steps": 25000}
-    # )
-    # arm_velocity_penalty1 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.3, "num_steps": 25000}
-    # )
+    ee_alignment_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -10.0, "num_steps": 50000}
+    )
+    arm_action_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -1.0, "num_steps": 50000}
+    )
+    arm_velocity_penalty1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -1.0, "num_steps": 50000}
+    )
     gripper_action_penalty1 = CurrTerm(
         func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.07, "num_steps": 50000}
     )

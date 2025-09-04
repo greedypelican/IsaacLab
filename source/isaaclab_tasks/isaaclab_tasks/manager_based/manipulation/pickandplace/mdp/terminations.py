@@ -46,9 +46,11 @@ def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
             env.extras["log"] = {}
         
         # Add phase metrics to extras["log"]
-        env.extras["log"]["Phases/phase_0_count"] = torch.sum(~phase_flags["phase1_complete"]).item()
-        env.extras["log"]["Phases/phase_1_count"] = torch.sum(phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]).item()
-        env.extras["log"]["Phases/phase_2_count"] = torch.sum(phase_flags["phase2_complete"]).item()
+        env.extras["log"]["Phases/phase_1_count"] = torch.sum(~phase_flags["phase1_complete"]).item()
+        env.extras["log"]["Phases/phase_2_count"] = torch.sum(phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]).item()
+        env.extras["log"]["Phases/phase_3_count"] = torch.sum(phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]).item()
+        env.extras["log"]["Phases/phase_4_count"] = torch.sum(phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"]).item()
+        env.extras["log"]["Phases/phase_5_count"] = torch.sum(phase_flags["phase4_complete"]).item()
         
         # Debug print
         # print(f"Phase metrics logged: phase0={env.extras['log']['Metrics/phase_0_count']}, phase1={env.extras['log']['Metrics/phase_1_count']}, phase2={env.extras['log']['Metrics/phase_2_count']}")
@@ -96,11 +98,11 @@ def object_out_of_bounds(
     return out_of_bounds
 
 
-def object_dropped(
+def object_drop(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     height_threshold: float = 0.05,
-    force_threshold: float = 1.0,
+    force_threshold: float = 0.01,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
     
@@ -143,8 +145,6 @@ def object_dropped(
     # 1. phase1_complete is True (object was successfully grasped)
     # 2. Object is above height threshold (was lifted)
     # 3. Both fingers lost contact (grasping failed after success)
-    object_dropped = phase_flags["phase1_complete"] & (object_height > height_threshold) & ~both_contact
+    object_drop = phase_flags["phase1_complete"] & (object_height > height_threshold) & ~both_contact
     
-    return object_dropped
-
-
+    return object_drop

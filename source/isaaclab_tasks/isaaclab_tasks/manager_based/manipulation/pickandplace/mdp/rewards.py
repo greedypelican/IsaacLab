@@ -17,6 +17,21 @@ from isaaclab.envs import ManagerBasedRLEnv
 
 from .events import phase_flags
 
+
+def get_phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
+    """Helper function to get current phase states for all environments.
+    
+    Returns:
+        Dictionary containing boolean tensors for each phase state.
+    """
+    return {
+        "pick_phase": ~phase_flags["phase1_complete"],
+        "ascend_phase": phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"],
+        "descend_phase": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
+        "place_phase": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
+        "goback_phase": phase_flags["phase4_complete"],
+    }
+
 def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Basic reward for phase completion to encourage progression through pick and place phases.
     
@@ -26,27 +41,14 @@ def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
     - Descend phase complete: 7.5 reward
     - Place phase complete: 10.0 reward (final success)
     """
-    # Get current phase flags for all environments
-    phase1_complete = phase_flags["phase1_complete"]
-    phase2_complete = phase_flags["phase2_complete"] 
-    phase3_complete = phase_flags["phase3_complete"]
-    phase4_complete = phase_flags["phase4_complete"]
+    phases = get_phase_states(env)
     
     # Calculate cumulative phase rewards with different weights
     phase_rewards = torch.zeros(env.num_envs, device=env.device)
-    
-    # Phase 1 reward: Pick phase completion (important first step)
-    phase_rewards += torch.where(phase1_complete, 1.0, 0.0)
-    
-    # Phase 2 reward: Ascend phase completion (lifting object)
-    phase_rewards += torch.where(phase2_complete, 5.0, 0.0)
-    
-    # Phase 3 reward: Descend phase completion (moving to place position)
-    phase_rewards += torch.where(phase3_complete, 7.5, 0.0)
-    
-    # Phase 4 reward: Place phase completion (final success - highest reward)
-    phase_rewards += torch.where(phase4_complete, 10.0, 0.0)
-    
+    phase_rewards += torch.where(phases["ascend_phase"], 1.0, 0.0)
+    phase_rewards += torch.where(phases["descend_phase"], 5.0, 0.0)
+    phase_rewards += torch.where(phases["place_phase"], 10, 0.0)
+    phase_rewards += torch.where(phases["goback_phase"], 15.0, 0.0)
     return phase_rewards
 
 def ee_distance(
@@ -61,6 +63,7 @@ def ee_distance(
     - Pick/Ascend/Descend phase (phase3_complete가 False): reach mode
     - Place phase (phase3_complete가 True): leave mode
     """
+    phases = get_phase_states(env)
     
     object: RigidObject = env.scene[object_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
@@ -69,23 +72,16 @@ def ee_distance(
     ee_w = ee_frame.data.target_pos_w[..., 0, :]
     object_ee_distance = torch.norm(cube_pos_w - ee_w, dim=1)
     
-    # 각 환경별로 mode 결정 (벡터화된 연산)
-    is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
-    is_ascend_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-    is_descend_phase = phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    is_place_phase = phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    
     # 벡터화된 reward 계산
     reach_reward = 1 - torch.tanh(object_ee_distance / std)
     leave_reward = torch.tanh(object_ee_distance / std) - 1
     
-    reward = torch.where(is_place_phase, leave_reward, reach_reward)
+    reward = torch.where(phases["place_phase"], leave_reward*3, reach_reward)
     return reward
 
 def object_contact(
     env: ManagerBasedRLEnv, 
-    grasp_force: float = 1.0, 
-    release_force: float = 1.0, #0.01
+    contact_threshold: float = 1.0, 
 ) -> torch.Tensor:
     """Reward the agent for contacting the object using contact sensor.
     
@@ -93,6 +89,7 @@ def object_contact(
     - Pick/Ascend/Descend phase: grasp mode
     - Place phase: release mode
     """
+    phases = get_phase_states(env)
 
     left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
     right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
@@ -103,30 +100,22 @@ def object_contact(
     right_forces_sum = torch.sum(right_forces, dim=(1, 2))
     left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
     right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
-    left_grasp_contact = (left_force_magnitudes > grasp_force)
-    right_grasp_contact = (right_force_magnitudes > grasp_force)
-    left_release_contact = (left_force_magnitudes > release_force)
-    right_release_contact = (right_force_magnitudes > release_force)
-    
-    # 각 환경별로 mode 결정 (벡터화된 연산)
-    is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
-    is_ascend_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-    is_descend_phase = phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    is_place_phase = phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
+    left_contact = (left_force_magnitudes > contact_threshold)
+    right_contact = (right_force_magnitudes > contact_threshold)
     
     # 벡터화된 reward 계산
-    grasp_reward = torch.where(left_grasp_contact & right_grasp_contact, 1.0, 
-                             torch.where(left_grasp_contact | right_grasp_contact, 0.5, 0.0))
-    release_reward = torch.where(~(left_release_contact & right_release_contact), 1.0, 
-                             torch.where(left_release_contact | right_release_contact, 0.5, 0.0))
+    grasp_reward = torch.where(left_contact & right_contact, 1.0, 
+                       torch.where(left_contact | right_contact, 0.5, 0.0))
+    release_reward = torch.where(~(left_contact & right_contact), 1.0, 
+                         torch.where(left_contact | right_contact, 0.5, 0.0))
     
-    reward = torch.where(is_place_phase, release_reward, grasp_reward)
+    reward = torch.where(phases["place_phase"], release_reward, grasp_reward)
     return reward
 
 def object_height(
     env: ManagerBasedRLEnv, 
-    ascend_height: float = 0.03, 
-    descend_height: float = 0.05,
+    height_threshold: float = 0.03, 
+    descend_threshold: float = 0.07,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"), 
 ) -> torch.Tensor:
     """Reward the agent for lifting the object above the minimal height but below maximal height.
@@ -135,26 +124,21 @@ def object_height(
     - Pick/Ascend/ phase: ascend mode
     - Descend/Place phase: descend mode
     """
+    phases = get_phase_states(env)
     
     object: RigidObject = env.scene[object_cfg.name]
     
-    # 각 환경별로 mode 결정 (벡터화된 연산)
-    is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
-    is_ascend_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-    is_descend_phase = phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    is_place_phase = phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    
     # Pick/Ascend phase: 높은 높이 장려/유지
-    ascend_reward = torch.where((object.data.root_pos_w[:, 2] > ascend_height) & (object.data.root_pos_w[:, 2] < 0.4), 1.0, 0.0)
+    ascend_reward = torch.where((object.data.root_pos_w[:, 2] > height_threshold) & (object.data.root_pos_w[:, 2] < 0.4), 1.0, 0.0)
     
     # Descend/Place phase: 낮은 높이 장려
-    descend_reward = torch.where(object.data.root_pos_w[:, 2] < descend_height, 1.0, 0.0)
+    descend_reward = torch.where(object.data.root_pos_w[:, 2] < height_threshold, 1.0, 0.0)
     
     # phase에 따라 reward 선택
-    reward = torch.where(is_descend_phase, descend_reward, ascend_reward)
+    reward = torch.where(phases["descend_phase"], descend_reward, ascend_reward)
     return reward
 
-def object_pos(
+def object_track(
     env: ManagerBasedRLEnv, 
     std: float, 
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
@@ -166,12 +150,7 @@ def object_pos(
     - Pick/Ascend/ phase: ascend mode
     - Descend/Place phase: descend mode
     """
-    
-    # 각 환경별로 mode 결정 (벡터화된 연산)
-    is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
-    is_ascend_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-    is_descend_phase = phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    is_place_phase = phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
+    phases = get_phase_states(env)
     
     # extract the used quantities (to enable type-hinting)
     robot: RigidObject = env.scene[robot_cfg.name]
@@ -181,8 +160,9 @@ def object_pos(
     ascend_command = env.command_manager.get_command("ascend")
     descend_command = env.command_manager.get_command("descend")
     
+    
     # phase에 따라 command 선택
-    command = torch.where(is_descend_phase.unsqueeze(-1).expand(-1, ascend_command.shape[-1]), 
+    command = torch.where(phases["descend_phase"].unsqueeze(-1).expand(-1, ascend_command.shape[-1]), 
                          descend_command, ascend_command)
     
     des_pos_b = command[:, :3]
@@ -194,27 +174,20 @@ def object_pos(
     
     command_reward = 1 - torch.tanh((distance + height_diff) / std)
 
-    reward = torch.where(is_place_phase, command_reward*2.0, 
-                torch.where(is_descend_phase, command_reward*1.5, 
-                    torch.where(is_ascend_phase, command_reward, 0.0)))
+    reward = torch.where(phases["place_phase"], command_reward*3.0, 
+                torch.where(phases["descend_phase"], command_reward*2.0, 
+                    torch.where(phases["ascend_phase"], command_reward, 0.0)))
     return reward
 
-def object_placement(
+def object_place(
     env: ManagerBasedRLEnv,
-    distance_threshold: float,
-    height_threshold: float,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Reward for successfully placing the object at the target location.
     
     Only activates rewards when in the place phase (is_place_phase = True).
     """
-
-    # 각 환경별로 mode 결정 (벡터화된 연산)
-    is_pick_phase = ~phase_flags["phase1_complete"]  # (num_envs,) boolean tensor
-    is_ascend_phase = phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]  # (num_envs,) boolean tensor
-    is_descend_phase = phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
-    is_place_phase = phase_flags["phase3_complete"]  # (num_envs,) boolean tensor
+    phases = get_phase_states(env)
 
     object: RigidObject = env.scene[object_cfg.name]
     place_command = env.command_manager.get_command("descend")
@@ -229,12 +202,65 @@ def object_placement(
     height_diff = torch.abs(object_pos[:, 2] - target_pos[:, 2])
     
     # Calculate placement reward (1.0 if within thresholds, 0.0 otherwise)
-    placement_reward = torch.where((xy_distance < distance_threshold) & (height_diff < height_threshold), 1.0, 0.0)
+    placement_reward = torch.where((xy_distance < 0.07) & (height_diff < 0.01), 0.5, 
+                           torch.where((xy_distance < 0.05) & (height_diff < 0.01), 0.7, 
+                               torch.where((xy_distance < 0.03) & (height_diff < 0.01), 1.0, 0.0)))
     
-    reward = torch.where(is_place_phase, placement_reward, 0.0)
-    # Only activate rewards when in place phase
+    
+    reward = torch.where(phases["place_phase"], placement_reward, 0.0)
     return reward
 
+def initial_pose_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    joint_names: list[str] | None = None,
+    std: float = 0.1,
+) -> torch.Tensor:
+    """Penalize deviation from initial joint positions.
+    
+    Only activates when in phase5 (after phase4 completion - object placed and released).
+    This encourages the robot to return to initial pose after completing the task.
+    
+    Args:
+        env: The environment.
+        asset_cfg: Asset configuration for the robot.
+        joint_names: List of joint names to penalize. If None, penalizes all joints.
+        std: Standard deviation for the penalty calculation.
+    
+    Returns:
+        Penalty based on deviation from initial joint positions (only in phase5).
+    """
+    # Check if in phase5 (phase4 completed - task finished)
+    
+    # Only apply penalty in phase5
+    phases = get_phase_states(env)
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    
+    # Get joint IDs
+    if joint_names is not None:
+        joint_ids, _ = asset.find_joints(joint_names)
+        if len(joint_ids) == 0:
+            return torch.zeros(env.num_envs, device=env.device)
+    else:
+        joint_ids = slice(None)
+    
+    # Get current joint positions and initial joint positions
+    current_joint_pos = asset.data.joint_pos[:, joint_ids]
+    initial_joint_pos = asset.data.default_joint_pos[:, joint_ids]
+    
+    # Calculate deviation from initial pose
+    joint_deviation = current_joint_pos - initial_joint_pos
+    
+    # Calculate penalty using L2 norm and tanh kernel for smooth penalty
+    deviation_norm = torch.linalg.norm(joint_deviation, dim=1)
+    
+    # Only apply penalty in phase5 (goback phase)
+    if not torch.any(phases["goback_phase"]):
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    penalty = torch.where(phases["goback_phase"], torch.tanh(deviation_norm/std), 0.0)
+    return penalty
 
 
 def world_ee_z_axis_alignment_penalty(

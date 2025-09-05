@@ -234,28 +234,25 @@ class RewardsCfg:
     )
     contact = RewTerm(
         func=mdp.object_contact, 
-        params={"grasp_force": 1.0, "release_force": 0.01}, 
         weight=2.0, 
     )
     height = RewTerm(
         func=mdp.object_height, 
-        params={"ascend_height": 0.03, "descend_height": 0.05}, 
         weight=3.0, 
     )
-    tracking = RewTerm(
-        func=mdp.object_pos, 
+    track = RewTerm(
+        func=mdp.object_track, 
         params={"std": 0.3}, 
         weight=5.0, 
     )
-    # fine_tracking = RewTerm(
-    #     func=mdp.object_pos, 
-    #     params={"std": 0.2}, 
-    #     weight=2.0, 
-    # )
-    placed = RewTerm(
-        func=mdp.object_placement, 
-        params={"distance_threshold": 0.02, "height_threshold": 0.01}, 
-        weight=15.0, 
+    place = RewTerm(
+        func=mdp.object_place, 
+        weight=20.0, 
+    )
+    goback = RewTerm(
+        func=mdp.initial_pose_penalty, 
+        params={"std": 0.1}, 
+        weight=-1.0, 
     )
     
     ee_alignment_penalty = RewTerm(
@@ -296,7 +293,7 @@ class TerminationsCfg:
 
     object_dropping = DoneTerm(
         func=mdp.object_drop, 
-        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05, "force_threshold": 0.01}, 
+        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05, "contact_threshold": 0.01}, 
     )
     object_out_of_bounds = DoneTerm(
         func=mdp.object_out_of_bounds, 
@@ -315,14 +312,14 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    ee_alignment_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -10.0, "num_steps": 50000}
-    )
+    # ee_alignment_penalty1 = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -10.0, "num_steps": 50000}
+    # )
     arm_action_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -1.0, "num_steps": 50000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.15, "num_steps": 100000}
     )
     arm_velocity_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -1.0, "num_steps": 50000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.15, "num_steps": 100000}
     )
     gripper_action_penalty1 = CurrTerm(
         func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.07, "num_steps": 50000}

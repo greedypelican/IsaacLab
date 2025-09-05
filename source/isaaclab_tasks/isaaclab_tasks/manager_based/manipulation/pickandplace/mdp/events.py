@@ -60,16 +60,11 @@ def check_and_update_phase_flags(
     right_forces_sum = torch.sum(right_forces, dim=(1, 2))
     left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
     right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
+
     left_contact = (left_force_magnitudes > 1.0)
     right_contact = (right_force_magnitudes > 1.0)
     grasping = left_contact & right_contact
-
-    left_grasp_contact = (left_force_magnitudes > 1.0)
-    right_grasp_contact = (right_force_magnitudes > 1.0)
-    grasping = left_grasp_contact & right_grasp_contact
-    left_release_contact = (left_force_magnitudes > 1.0) #0.01
-    right_release_contact = (right_force_magnitudes > 1.0) #0.01
-    releasing = ~(left_release_contact & right_release_contact)
+    releasing = ~(left_contact & right_contact)
 
     # Phase 1: ee_frame과 object가 가깝고 grasping 상태
     ee_pos = ee_frame.data.target_pos_w[env_ids, 0, :]  # ee position
@@ -95,6 +90,6 @@ def check_and_update_phase_flags(
     phase_flags["phase3_complete"][env_ids] = phase_flags["phase3_complete"][env_ids] | (phase3_condition & phase_flags["phase2_complete"][env_ids])
 
     # Phase 4: object가 descend command와 가깝고 release 상태
-    phase4_condition = (distance_descend < 0.03) & releasing  # grasping 해제
+    phase4_condition = (distance_descend < 0.07) & releasing  # grasping 해제
     # phase3가 완료된 환경들에서만 phase4 업데이트
     phase_flags["phase4_complete"][env_ids] = phase_flags["phase4_complete"][env_ids] | (phase4_condition & phase_flags["phase3_complete"][env_ids])

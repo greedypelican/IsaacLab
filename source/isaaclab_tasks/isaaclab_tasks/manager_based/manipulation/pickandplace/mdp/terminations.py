@@ -102,7 +102,7 @@ def object_drop(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     height_threshold: float = 0.05,
-    force_threshold: float = 0.01,
+    contact_threshold: float = 0.5,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
     
@@ -137,8 +137,8 @@ def object_drop(
     right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
     
     # Check if both fingers are in contact
-    left_contact = (left_force_magnitudes > force_threshold)
-    right_contact = (right_force_magnitudes > force_threshold)
+    left_contact = (left_force_magnitudes > contact_threshold)
+    right_contact = (right_force_magnitudes > contact_threshold)
     both_contact = left_contact & right_contact
     
     # Object is dropped if:

@@ -102,7 +102,7 @@ def object_drop(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     height_threshold: float = 0.05,
-    contact_threshold: float = 0.5,
+    contact_threshold: float = 0.01,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
     
@@ -148,3 +148,35 @@ def object_drop(
     object_drop = phase_flags["phase1_complete"] & (object_height > height_threshold) & ~both_contact
     
     return object_drop
+
+def gripper_contact_after_place(
+    env: ManagerBasedRLEnv,
+    contact_threshold: float = 0.0,
+) -> torch.Tensor:
+    """Terminate when gripper makes contact with object after phase5 (task completion)."""
+    # Check if phase_flags is initialized
+    if not phase_flags or "phase4_complete" not in phase_flags:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    # Get contact sensors
+    left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
+    right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
+    
+    # Calculate contact forces
+    left_forces = left_finger_sensor.data.force_matrix_w
+    right_forces = right_finger_sensor.data.force_matrix_w
+    
+    left_forces_sum = torch.sum(left_forces, dim=(1, 2))
+    right_forces_sum = torch.sum(right_forces, dim=(1, 2))
+    left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
+    right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
+    
+    # Check if both fingers are in contact
+    left_contact = (left_force_magnitudes > contact_threshold)
+    right_contact = (right_force_magnitudes > contact_threshold)
+    both_contact = left_contact & right_contact
+    
+    # Terminate if phase4 is complete AND gripper makes contact with object
+    gripper_contact_after_place = phase_flags["phase4_complete"] & both_contact
+    
+    return gripper_contact_after_place

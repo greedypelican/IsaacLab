@@ -247,11 +247,11 @@ class RewardsCfg:
     )
     place = RewTerm(
         func=mdp.object_place, 
-        weight=20.0, 
+        weight=15.0, 
     )
     goback = RewTerm(
         func=mdp.initial_pose_penalty, 
-        params={"std": 0.1}, 
+        params={"std": 0.3}, 
         weight=-1.0, 
     )
     
@@ -306,6 +306,9 @@ class TerminationsCfg:
                                       "forearm_link", "spherical_wrist_.*", "bracelet_with_vision_link"]), 
                 "threshold": 1.0}, 
     )
+    object_contact = DoneTerm(
+        func=mdp.gripper_contact_after_place, 
+    )
 
 
 @configclass
@@ -315,33 +318,33 @@ class CurriculumCfg:
     # ee_alignment_penalty1 = CurrTerm(
     #     func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -10.0, "num_steps": 50000}
     # )
-    arm_action_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.15, "num_steps": 100000}
-    )
-    arm_velocity_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.15, "num_steps": 100000}
-    )
+    # arm_action_penalty1 = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.15, "num_steps": 50000}
+    # )
+    # arm_velocity_penalty1 = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.15, "num_steps": 50000}
+    # )
     gripper_action_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.07, "num_steps": 50000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.035, "num_steps": 50000}  #-0.07
     )
     gripper_velocity_penalty1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.05, "num_steps": 50000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.025, "num_steps": 50000}  #-0.05
     )
 
     # ee_alignment_penalty2 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -5.0, "num_steps": 50000}
+    #     func=mdp.modify_reward_weight, params={"term_name": "ee_alignment_penalty", "weight": -5.0, "num_steps": 100000}
     # )
     # arm_action_penalty2 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -1.0, "num_steps": 50000}
+    #     func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.5, "num_steps": 100000}
     # )
     # arm_velocity_penalty2 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -1.0, "num_steps": 50000}
+    #     func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.5, "num_steps": 100000}
     # )
     # gripper_action_penalty2 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.8, "num_steps": 50000}
+    #     func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.35, "num_steps": 100000}
     # )
     # gripper_velocity_penalty2 = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.3, "num_steps": 50000}
+    #     func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.25, "num_steps": 100000}
     # )
 
 

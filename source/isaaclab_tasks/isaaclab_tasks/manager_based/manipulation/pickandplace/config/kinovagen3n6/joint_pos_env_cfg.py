@@ -71,7 +71,7 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
                     prim_path="{ENV_REGEX_NS}/Robot/gripper_base_link",
                     name="end_effector",
                     offset=OffsetCfg(
-                        pos=[0.14, 0.0, 0.0],
+                        pos=[0.15, 0.0, 0.0],
                     ),
                 ),
             ],
@@ -79,6 +79,9 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
 
         self.rewards.ee_alignment_penalty.params = {"asset_cfg": SceneEntityCfg("robot"), "body_name": "gripper_base_link"}
         # self.rewards.object_world_z_axis_alignment_penalty.params = {"object_cfg": SceneEntityCfg("object")}
+        # Restrict goback (initial_pose_reward) to specific joints for this robot
+        self.rewards.goback.params["joint_names"] = ["joint_.*", "left_outer_knuckle_joint",]
+        self.rewards.ready.params["joint_names"] = ["joint_.*", "left_outer_knuckle_joint",]
 
 
 @configclass

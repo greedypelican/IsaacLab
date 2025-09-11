@@ -29,7 +29,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from . import mdp
 
 
-EPISODE_LENGTH_SEC = 10.0
+EPISODE_LENGTH_SEC = 12.0
 DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
@@ -62,7 +62,6 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
         spawn=UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-            # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
             scale=(0.8, 0.8, 0.8),
             rigid_props=RigidBodyPropertiesCfg(
                 solver_position_iteration_count=16,
@@ -144,7 +143,7 @@ class CommandsCfg:
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC), 
         debug_vis=True, 
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.013, 0.013), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
         ), 
     )
 
@@ -205,6 +204,10 @@ class EventCfg:
             "asset_cfg": SceneEntityCfg("object", body_names="Object"), 
         },
     )
+    cache_object_initial_pose = EventTerm(
+        func=mdp.cache_object_initial_pose,
+        mode="reset",
+    )
     reset_phase_flags = EventTerm(
         func=mdp.reset_phase_flags, 
         mode="reset", 
@@ -223,33 +226,32 @@ class RewardsCfg:
     
     # Phase-based basic rewards for task progression
     phase = RewTerm(
-        func=mdp.phase_complete, 
-        weight=1.0, 
+        func=mdp.phase_complete,
+        weight=1.0,
     )
-    
     distance = RewTerm(
-        func=mdp.ee_distance, 
-        weight=1.0, 
+        func=mdp.ee_distance,
+        weight=1.0,
     )
     contact = RewTerm(
-        func=mdp.object_contact, 
-        weight=2.0, 
+        func=mdp.object_contact,
+        weight=1.0,
     )
     height = RewTerm(
-        func=mdp.object_height, 
-        weight=3.0, 
+        func=mdp.object_height,
+        weight=1.0,
     )
     track = RewTerm(
         func=mdp.object_track, 
-        weight=5.0, 
-    )
-    place = RewTerm(
-        func=mdp.object_place, 
-        weight=15.0, 
+        weight=1.0,
     )
     goback = RewTerm(
-        func=mdp.initial_pose_penalty, 
-        weight=-1.0, 
+        func=mdp.initial_pose,
+        weight=1.0,
+    )
+    ready = RewTerm(
+        func=mdp.joint_similarity,
+        weight=1.0,
     )
     
     ee_alignment_penalty = RewTerm(
@@ -260,13 +262,13 @@ class RewardsCfg:
     arm_action_penalty = RewTerm(
         func=mdp.action_rate_penalty, 
         params={"action_type": "arm_actions"}, 
-        weight=-0.07, 
+        weight=-0.05, 
     )
     arm_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty, 
         params={"joint_type": "arm_joints"}, 
-        weight=-0.07, 
-    )    
+        weight=-0.05, 
+    )
     gripper_action_penalty = RewTerm(
         func=mdp.action_rate_penalty, 
         params={"action_type": "gripper_actions"}, 
@@ -303,8 +305,8 @@ class TerminationsCfg:
                                       "forearm_link", "spherical_wrist_.*", "bracelet_with_vision_link"]), 
                 "threshold": 1.0}, 
     )
-    object_contact = DoneTerm(
-        func=mdp.gripper_contact_after_place, 
+    object_move_after_place = DoneTerm(
+        func=mdp.object_move_after_place,
     )
 
 
@@ -316,34 +318,34 @@ class CurriculumCfg:
     arm_action_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage, 
         params={"term_name": "arm_action_penalty", 
-                "num_steps_1": 50000, 
-                "num_steps_2": 100000, 
-                "weight_1": -0.15, 
-                "weight_2": -0.5,}
+                "num_steps_1": 40000, 
+                "num_steps_2": 80000, 
+                "weight_1": -0.07, 
+                "weight_2": -0.1,}
     )
     arm_velocity_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage, 
         params={"term_name": "arm_velocity_penalty", 
-                "num_steps_1": 50000, 
-                "num_steps_2": 100000, 
-                "weight_1": -0.15, 
-                "weight_2": -0.5,}
+                "num_steps_1": 40000, 
+                "num_steps_2": 80000, 
+                "weight_1": -0.07, 
+                "weight_2": -0.1,}
     )
     gripper_action_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage, 
         params={"term_name": "gripper_action_penalty", 
-                "num_steps_1": 50000, 
-                "num_steps_2": 100000, 
-                "weight_1": -0.03, 
-                "weight_2": -0.1,}
+                "num_steps_1": 20000, 
+                "num_steps_2": 60000, 
+                "weight_1": -0.04, 
+                "weight_2": -0.08,}
     )
     gripper_velocity_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage, 
         params={"term_name": "gripper_velocity_penalty", 
-                "num_steps_1": 50000, 
-                "num_steps_2": 100000, 
-                "weight_1": -0.02, 
-                "weight_2": -0.7,}
+                "num_steps_1": 20000, 
+                "num_steps_2": 60000, 
+                "weight_1": -0.03, 
+                "weight_2": -0.06,}
     )
 
 

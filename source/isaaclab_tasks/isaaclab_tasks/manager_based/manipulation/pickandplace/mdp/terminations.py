@@ -15,7 +15,7 @@ import torch
 
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import combine_frame_transforms
+from isaaclab.utils.math import combine_frame_transforms, subtract_frame_transforms
 from isaaclab.envs import ManagerBasedRLEnv
 
 from .events import phase_flags
@@ -149,34 +149,37 @@ def object_drop(
     
     return object_drop
 
-def gripper_contact_after_place(
+def object_move_after_place(
     env: ManagerBasedRLEnv,
-    contact_threshold: float = 0.0,
+    move_threshold: float = 0.03,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
-    """Terminate when gripper makes contact with object after phase5 (task completion)."""
-    # Check if phase_flags is initialized
-    if not phase_flags or "phase4_complete" not in phase_flags:
+    """Terminate if, after Phase 3 success, the object moves in XY more than a threshold in the ROBOT ROOT frame.
+
+    Compares current object position in robot root frame vs. the cached position (also in robot root frame)
+    captured when Phase 3 first completed.
+    """
+    # Validate phase flags
+    if not phase_flags or "phase3_complete" not in phase_flags:
         return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
 
-    # Get contact sensors
-    left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
-    right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
-    
-    # Calculate contact forces
-    left_forces = left_finger_sensor.data.force_matrix_w
-    right_forces = right_finger_sensor.data.force_matrix_w
-    
-    left_forces_sum = torch.sum(left_forces, dim=(1, 2))
-    right_forces_sum = torch.sum(right_forces, dim=(1, 2))
-    left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
-    right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
-    
-    # Check if both fingers are in contact
-    left_contact = (left_force_magnitudes > contact_threshold)
-    right_contact = (right_force_magnitudes > contact_threshold)
-    both_contact = left_contact & right_contact
-    
-    # Terminate if phase4 is complete AND gripper makes contact with object
-    gripper_contact_after_place = phase_flags["phase4_complete"] & both_contact
-    
-    return gripper_contact_after_place
+    # If the cache does not exist yet, no termination (nothing to compare against)
+    if not hasattr(env, "_object_pos_b_at_phase3"):
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    # Assets
+    robot = env.scene[robot_cfg.name]
+    obj = env.scene[object_cfg.name]
+
+    # Current object position in robot root frame
+    obj_pos_b, _ = subtract_frame_transforms(robot.data.root_pos_w, robot.data.root_quat_w, obj.data.root_pos_w[:, :3])
+    cached_xy = env._object_pos_b_at_phase3[:, :2]
+    current_xy = obj_pos_b[:, :2]
+
+    # Displacement in XY in robot frame
+    disp_xy = torch.linalg.norm(current_xy - cached_xy, dim=1)
+
+    # Trigger only after Phase 3 is latched
+    terminate = phase_flags["phase3_complete"] & (disp_xy > move_threshold)
+    return terminate

@@ -51,6 +51,31 @@ def object_orientation_in_robot_root_frame(
     return object_quat_b
 
 
+def object_initial_position_in_robot_root_frame(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Return cached initial object position in robot root frame.
+
+    Filled by the reset event `cache_object_initial_pose`.
+    """
+    # Ensure buffers exist to avoid attribute errors in edge cases
+    if not hasattr(env, "_object_initial_pos_b"):
+        env._object_initial_pos_b = torch.zeros(env.num_envs, 3, device=env.device)
+    return env._object_initial_pos_b
+
+
+def object_initial_orientation_in_robot_root_frame(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Return cached initial object orientation (quaternion) in robot root frame.
+
+    Filled by the reset event `cache_object_initial_pose`.
+    """
+    if not hasattr(env, "_object_initial_quat_b"):
+        env._object_initial_quat_b = torch.zeros(env.num_envs, 4, device=env.device)
+    return env._object_initial_quat_b
+
+
 def current_phase(
     env: ManagerBasedRLEnv,
 ) -> torch.Tensor:
@@ -62,7 +87,7 @@ def current_phase(
         1.0: ascend phase (phase1_complete가 True, phase2_complete가 False)
         2.0: descend phase (phase2_complete가 True, phase3_complete가 False)
         3.0: place phase (phase3_complete가 True, phase4_complete가 False)
-        4.0: goback phase (phase4_complete가 True)
+        4.0: ready phase (phase4_complete가 True)
     """
     # Phase flags가 초기화되지 않았으면 기본값 반환
     if not phase_flags or "phase1_complete" not in phase_flags:

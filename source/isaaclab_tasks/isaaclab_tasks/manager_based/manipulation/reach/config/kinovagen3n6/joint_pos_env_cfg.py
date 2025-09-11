@@ -84,16 +84,16 @@ class KinovaGen3N6CurriculumCfg(CurriculumCfg):
 
     # Keep curriculum gentle (no further increase in penalty magnitudes)
     arm_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.02, "num_steps": 7000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.02, "num_steps": 10000}
     )
     arm_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.002, "num_steps": 7000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.002, "num_steps": 10000}
     )
     gripper_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.01, "num_steps": 7000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.01, "num_steps": 10000}
     )
     gripper_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.0001, "num_steps": 7000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.0001, "num_steps": 10000}
     )
 
     def __post_init__(self):

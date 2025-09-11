@@ -75,5 +75,14 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
             stiffness=0.0,
             damping=0.0,
         ),
-    }, 
+    },
 )
+
+KINOVAGEN3N6_REACH_CFG = KINOVAGEN3N6_CFG.copy()
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_1"] = 0.0
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_2"] = 2*math.pi/9
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_3"] = -11*math.pi/18
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_4"] = 0.0
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_5"] = math.pi/6
+KINOVAGEN3N6_REACH_CFG.init_state.joint_pos["joint_6"] = math.pi/2
+        

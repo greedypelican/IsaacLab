@@ -9,7 +9,7 @@ from isaaclab.utils import configclass
 
 import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
 from . import mdp as kinovagen3n6_mdp
-from isaaclab_tasks.manager_based.manipulation.reach.reach_env_cfg import ReachEnvCfg, RewardsCfg, CurriculumCfg
+from isaaclab_tasks.manager_based.manipulation.reach.reach_env_cfg import ReachEnvCfg, EventCfg, RewardsCfg, CurriculumCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -26,7 +26,7 @@ from isaaclab_assets.robots.kinovagen3n6 import KINOVAGEN3N6_REACH_CFG  # isort:
 ##
 
 @configclass
-class KinovaGen3N6EventCfg:
+class KinovaGen3N6EventCfg(EventCfg):
     reset_all = EventTerm(
         func=mdp.reset_scene_to_default,
         mode="reset", 
@@ -36,11 +36,12 @@ class KinovaGen3N6EventCfg:
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
-            "position_range": (-0.05, 0.05),
+            "position_range": (-0.1, 0.1),
             "velocity_range": (0.0, 0.0),
         },
     )
     def __post_init__(self):
+        # self.reset_robot_joints = None
         pass
 
 @configclass
@@ -48,30 +49,31 @@ class KinovaGen3N6RewardsCfg(RewardsCfg):
     arm_action_penalty = RewTerm(
         func=kinovagen3n6_mdp.action_rate_penalty, 
         params={"action_type": "arm_actions"}, 
-        weight=-0.01, 
+        weight=-0.1, 
     )
     arm_velocity_penalty = RewTerm(
         func=kinovagen3n6_mdp.joint_velocity_penalty, 
         params={"joint_type": "arm_joints"}, 
-        weight=-0.001, 
+        weight=-0.1, 
     )
     gripper_action_penalty = RewTerm(
         func=kinovagen3n6_mdp.action_rate_penalty, 
         params={"action_type": "gripper_actions"}, 
-        weight=-0.005, 
+        weight=-0.05, 
     )
     gripper_velocity_penalty = RewTerm(
         func=kinovagen3n6_mdp.joint_velocity_penalty, 
         params={"joint_type": "gripper_joints"}, 
-        weight=-0.00005, 
+        weight=-0.05, 
     )
 
     def __post_init__(self):
-        self.end_effector_position_tracking_fine_grained.weight = 1.0
+        self.end_effector_position_tracking_fine_grained.weight = 3.0
+        self.end_effector_position_tracking_fine_grained.params["std"] = 0.3
         self.end_effector_position_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
         self.end_effector_position_tracking_fine_grained.params["asset_cfg"].body_names = ["gripper_base_link"]
-        # self.end_effector_orientation_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
-        self.end_effector_orientation_tracking = None
+        self.end_effector_orientation_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
+        # self.end_effector_orientation_tracking = None
         self.action_rate = None
         self.joint_vel = None
         # self.action_rate.weight = -0.001
@@ -84,16 +86,16 @@ class KinovaGen3N6CurriculumCfg(CurriculumCfg):
 
     # Keep curriculum gentle (no further increase in penalty magnitudes)
     arm_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.02, "num_steps": 10000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_action_penalty", "weight": -0.3, "num_steps": 8000}
     )
     arm_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.002, "num_steps": 10000}
+        func=mdp.modify_reward_weight, params={"term_name": "arm_velocity_penalty", "weight": -0.3, "num_steps": 8000}
     )
     gripper_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.01, "num_steps": 10000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_action_penalty", "weight": -0.15, "num_steps": 8000}
     )
     gripper_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.0001, "num_steps": 10000}
+        func=mdp.modify_reward_weight, params={"term_name": "gripper_velocity_penalty", "weight": -0.15, "num_steps": 8000}
     )
 
     def __post_init__(self):
@@ -121,8 +123,7 @@ class KinovaGen3N6ReachEnvCfg(ReachEnvCfg):
 
         # switch robot to Kinova Gen3 6dof
         self.scene.robot = KINOVAGEN3N6_REACH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        # override events
-        self.events.reset_robot_joints.params["position_range"] = (0.75, 1.25)
+
         # limit velocity penalty to arm joints only (exclude gripper/mimic joints)
 
         # override actions

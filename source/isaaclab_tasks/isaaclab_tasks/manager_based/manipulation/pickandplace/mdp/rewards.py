@@ -457,12 +457,12 @@ def object_world_z_axis_alignment_penalty(
 
 
 
-def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all_actions") -> torch.Tensor:
+def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all") -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel.
     
     Args:
         env: The environment.
-        action_type: Type of action to calculate rate for. Options: "arm_actions", "gripper_actions", "all_actions"
+        action_type: Type of action to calculate rate for. Options: "arm", "gripper", "all"
     
     Returns:
         Action rate penalty for the specified action type.
@@ -472,34 +472,59 @@ def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all_actions"
     current_action = env.action_manager.action
     prev_action = env.action_manager.prev_action
     
-    if action_type == "arm_actions":
+    if action_type == "arm":
         # arm_action에 대한 action rate 계산
         # arm_action은 action vector의 앞부분 (gripper 제외)
         arm_action_dim = current_action.shape[1] - 1  # 마지막 1개는 gripper
         action_diff = current_action[:, :arm_action_dim] - prev_action[:, :arm_action_dim]
         
-    elif action_type == "gripper_actions":
+    elif action_type == "gripper":
         # gripper_action에 대한 action rate 계산
         # gripper_action은 action vector의 마지막 부분
         gripper_action_dim = 1  # BinaryJointPositionActionCfg는 보통 1차원
         action_diff = current_action[:, -gripper_action_dim:] - prev_action[:, -gripper_action_dim:]
         
-    elif action_type == "all_actions":
+    elif action_type == "all":
         # 모든 action에 대한 action rate 계산 (기본값)
         action_diff = current_action - prev_action
         
     else:
-        raise ValueError(f"Unknown action_type: {action_type}. Must be 'arm_action', 'gripper_action', or 'all_actions'")
+        raise ValueError(f"Unknown action_type: {action_type}. Must be 'arm', 'gripper', or 'all'")
     
     penalty = torch.mean(torch.square(action_diff), dim=1)
     return torch.where(phases["ready_phase"], penalty*3.0, penalty)
 
-def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all_joints") -> torch.Tensor:
+def joint_torques_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
+    """Penalize joint torques on the articulation."""
+    phases = _phase_states(env)
+
+    asset: Articulation = env.scene["robot"]
+
+    if joint_type == "arm":
+        # arm joints에 대한 velocity penalty 계산
+        joint_names = ["joint_.*"]  # arm joint 패턴
+    elif joint_type == "gripper":
+        # gripper joints에 대한 velocity penalty 계산
+        joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
+    elif joint_type == "all":
+        # 모든 joint에 대한 velocity penalty 계산
+        joint_names = ["joint_.*", "left_outer_knuckle_joint"]
+    else:
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
+
+    joint_ids, _ = asset.find_joints(joint_names)
+    if len(joint_ids) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    penalty = torch.mean(torch.square(asset.data.applied_torque[:, joint_ids]), dim=1)
+    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+
+def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint velocities on the articulation based on joint type.
     
     Args:
         env: The environment.
-        joint_type: Type of joints to penalize. Options: "arm_joints", "gripper_joints", "all_joints"
+        joint_type: Type of joints to penalize. Options: "arm", "gripper", "all"
     
     Returns:
         Velocity penalty for the specified joint type.
@@ -508,50 +533,46 @@ def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all_joints
 
     asset: Articulation = env.scene["robot"]
     
-    if joint_type == "arm_joints":
+    if joint_type == "arm":
         # arm joints에 대한 velocity penalty 계산
         joint_names = ["joint_.*"]  # arm joint 패턴
-    elif joint_type == "gripper_joints":
+    elif joint_type == "gripper":
         # gripper joints에 대한 velocity penalty 계산
         joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
-    elif joint_type == "all_joints":
+    elif joint_type == "all":
         # 모든 joint에 대한 velocity penalty 계산
         joint_names = ["joint_.*", "left_outer_knuckle_joint"]
     else:
-        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm_joints', 'gripper_joints', or 'all_joints'")
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
     
     joint_ids, _ = asset.find_joints(joint_names)
     if len(joint_ids) == 0:
         return torch.zeros(env.num_envs, device=env.device)
     
     penalty = torch.mean(torch.square(asset.data.joint_vel[:, joint_ids]), dim=1)
-    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)
 
-def joint_acceleration_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+def joint_acceleration_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint accelerations on the articulation."""
-    asset: Articulation = env.scene[asset_cfg.name]
-    
-    if asset_cfg.joint_names is not None:
-        joint_ids, _ = asset.find_joints(asset_cfg.joint_names)
-        if len(joint_ids) == 0:
-            return torch.zeros(env.num_envs, device=env.device)
-    else:
-        joint_ids = slice(None)
-    
-    penalty = torch.linalg.norm(asset.data.joint_acc[:, joint_ids], dim=1)
-    return torch.clamp(penalty, max=50.0)
+    phases = _phase_states(env)
 
-def joint_torques_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalize joint torques on the articulation."""
-    asset: Articulation = env.scene[asset_cfg.name]
-    
-    if asset_cfg.joint_names is not None:
-        joint_ids, _ = asset.find_joints(asset_cfg.joint_names)
-        if len(joint_ids) == 0:
-            return torch.zeros(env.num_envs, device=env.device)
+    asset: Articulation = env.scene["robot"]
+
+    if joint_type == "arm":
+        # arm joints에 대한 velocity penalty 계산
+        joint_names = ["joint_.*"]  # arm joint 패턴
+    elif joint_type == "gripper":
+        # gripper joints에 대한 velocity penalty 계산
+        joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
+    elif joint_type == "all":
+        # 모든 joint에 대한 velocity penalty 계산
+        joint_names = ["joint_.*", "left_outer_knuckle_joint"]
     else:
-        joint_ids = slice(None)
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
+
+    joint_ids, _ = asset.find_joints(joint_names)
+    if len(joint_ids) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
     
-    penalty = torch.linalg.norm(asset.data.applied_torque[:, joint_ids], dim=1)
-    
-    return torch.clamp(penalty, max=200.0)
+    penalty = torch.mean(torch.square(asset.data.joint_acc[:, joint_ids]), dim=1)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)

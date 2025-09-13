@@ -22,8 +22,9 @@ import isaaclab.sim as sim_utils
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg, RigidObjectCfg
-from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
+from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 
 from . import mdp
 
@@ -82,9 +83,9 @@ class SceneCfg(InteractiveSceneCfg):
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
-    contact_forces_arm = MISSING
-    contact_forces_left_finger_pad = MISSING
-    contact_forces_right_finger_pad = MISSING
+    contact_forces_arm: ContactSensorCfg = MISSING
+    contact_forces_left_finger_pad: ContactSensorCfg = MISSING
+    contact_forces_right_finger_pad: ContactSensorCfg = MISSING
 
 
 @configclass

@@ -3,8 +3,4 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-
-"""This sub-module contains the functions that are specific to the Spot locomotion task."""
 from isaaclab_tasks.manager_based.manipulation.pickandplace.mdp import *
-from .events import *  # noqa: F401, F403
-from .rewards import *  # noqa: F401, F403

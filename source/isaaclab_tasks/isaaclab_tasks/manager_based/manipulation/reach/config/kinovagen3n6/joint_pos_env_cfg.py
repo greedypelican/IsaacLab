@@ -11,6 +11,7 @@ import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
 from . import mdp as kinovagen3n6_mdp
 from isaaclab_tasks.manager_based.manipulation.reach.reach_env_cfg import ReachEnvCfg, EventCfg, RewardsCfg, CurriculumCfg
 from isaaclab.assets.articulation import ArticulationCfg
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -72,13 +73,9 @@ class KinovaGen3N6RewardsCfg(RewardsCfg):
         self.end_effector_position_tracking_fine_grained.params["std"] = 0.3
         self.end_effector_position_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
         self.end_effector_position_tracking_fine_grained.params["asset_cfg"].body_names = ["gripper_base_link"]
-        self.end_effector_orientation_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
-        # self.end_effector_orientation_tracking = None
+        self.end_effector_orientation_tracking = None
         self.action_rate = None
         self.joint_vel = None
-        # self.action_rate.weight = -0.001
-        # self.joint_vel.weight = -0.0001
-        # self.joint_vel.params["asset_cfg"].joint_names = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
 
 @configclass
 class KinovaGen3N6CurriculumCfg(CurriculumCfg):
@@ -101,14 +98,13 @@ class KinovaGen3N6CurriculumCfg(CurriculumCfg):
     def __post_init__(self):
         self.action_rate = None
         self.joint_vel = None
-        # self.action_rate.params["weight"] = -0.005
 
 
 @configclass
 class KinovaGen3N6ReachEnvCfg(ReachEnvCfg):
+    events: KinovaGen3N6EventCfg = KinovaGen3N6EventCfg()
     rewards: KinovaGen3N6RewardsCfg = KinovaGen3N6RewardsCfg()
     curriculum: KinovaGen3N6CurriculumCfg = KinovaGen3N6CurriculumCfg()
-    events: KinovaGen3N6EventCfg = KinovaGen3N6EventCfg()
 
     def __post_init__(self):
         # post init of parent

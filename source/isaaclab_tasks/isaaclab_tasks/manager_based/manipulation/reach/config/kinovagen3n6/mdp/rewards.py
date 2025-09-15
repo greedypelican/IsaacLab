@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import wrap_to_pi
+from isaaclab.assets import RigidObject
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import wrap_to_pi, quat_error_magnitude, quat_mul
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -97,3 +99,19 @@ def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all_joints
     joint_vel = torch.clamp(joint_vel, -10.0, 10.0)
     penalty = torch.mean(torch.square(joint_vel), dim=1)
     return penalty
+
+def orientation_command_error_tanh(env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Reward tracking of the orientation using the tanh kernel.
+    
+    The function computes the orientation error between the desired orientation (from the command) and the
+    current orientation of the asset's body (in world frame) and maps it with a tanh kernel.
+    """
+    # extract the asset (to enable type hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    # obtain the desired and current orientations
+    des_quat_b = command[:, 3:7]
+    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
+    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]  # type: ignore
+    distance = quat_error_magnitude(curr_quat_w, des_quat_w)
+    return 1 - torch.tanh(distance / std)

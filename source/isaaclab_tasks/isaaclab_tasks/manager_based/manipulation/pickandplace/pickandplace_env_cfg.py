@@ -136,10 +136,10 @@ class ObservationsCfg:
 
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
-        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
-        object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
-        lift_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
-        place_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
+        initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
+        initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
+        ascend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
+        descend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
         current_phase = ObsTerm(func=mdp.current_phase)
         actions = ObsTerm(func=mdp.last_action)
 
@@ -162,7 +162,7 @@ class EventCfg:
         func=mdp.randomize_physics_scene_gravity,
         mode="reset",
         params={
-            "gravity_distribution_params": ([0.0, 0.0, 0.0], [0.0, 0.0, 0.4]),
+            "gravity_distribution_params": ([0.0, 0.0, 0.0], [0.0, 0.0, 0.1]),
             "operation": "add",
             "distribution": "gaussian",
         },
@@ -173,7 +173,7 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "pose_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05), "yaw": (-0.1, 0.1)},
+            "pose_range": {"x": (-0.0, 0.0), "y": (-0.0, 0.0), "z": (-0.0, 0.0), "yaw": (-0.0, 0.0)},
             "velocity_range": {},
         },
     )
@@ -191,10 +191,11 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "static_friction_range": (0.3, 1.0),
-            "dynamic_friction_range": (0.3, 0.8),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 64,
+            "static_friction_range": (0.8, 1.0),
+            "dynamic_friction_range": (0.6, 0.8),
+            "restitution_range": (0.0, 0.02),
+            "num_buckets": 1,
+            "make_consistent": True,
         },
     )
     robot_amount_of_mass = EventTerm(
@@ -202,7 +203,7 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "mass_distribution_params": (0.7, 1.5),
+            "mass_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
@@ -211,7 +212,7 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+            "com_range": {"x": (-0.01, 0.01), "y": (-0.01, 0.01), "z": (-0.01, 0.01)},
         },
     )
 
@@ -228,12 +229,24 @@ class EventCfg:
         func=mdp.cache_object_initial_pose,
         mode="reset",
     )
+    object_physics_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("object"),
+            "static_friction_range": (0.3, 0.5),
+            "dynamic_friction_range": (0.2, 0.4),
+            "restitution_range": (0.0, 0.02),
+            "num_buckets": 1,
+            "make_consistent": True,
+        },
+    )
     object_amount_of_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("object"),
-            "mass_distribution_params": (0.7, 1.5),
+            "mass_distribution_params": (0.9, 1.1),
             "operation": "scale",
         },
     )
@@ -291,23 +304,23 @@ class RewardsCfg:
     arm_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
         params={"action_type": "arm"},
-        weight=-0.05,
+        weight=-0.03,
     )
     arm_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty,
         params={"joint_type": "arm"},
-        weight=-0.06,
+        weight=-0.05,
     )
     arm_acceleration_penalty = RewTerm(
         func=mdp.joint_acceleration_penalty,
         params={"joint_type": "arm"},
-        weight=-0.0001,
+        weight=-0.00003,
     )
-    arm_torque_penalty = RewTerm(
-        func=mdp.joint_torques_penalty,
-        params={"joint_type": "arm"},
-        weight=-0.0006,
-    )
+    # arm_torque_penalty = RewTerm(
+    #     func=mdp.joint_torques_penalty,
+    #     params={"joint_type": "arm"},
+    #     weight=-0.00004,
+    # )
     gripper_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
         params={"action_type": "gripper"},
@@ -323,11 +336,11 @@ class RewardsCfg:
         params={"joint_type": "gripper"},
         weight=-0.0,
     )
-    gripper_torque_penalty = RewTerm(
-        func=mdp.joint_torques_penalty,
-        params={"joint_type": "gripper"},
-        weight=-0.0,
-    )
+    # gripper_torque_penalty = RewTerm(
+    #     func=mdp.joint_torques_penalty,
+    #     params={"joint_type": "gripper"},
+    #     weight=-0.0,
+    # )
 
 
 @configclass
@@ -364,82 +377,82 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "arm_action_penalty",
-            "num_steps_1": 40000,
-            "num_steps_2": 80000,
-            "weight_1": -0.075,
-            "weight_2": -0.1,
+            "num_steps_1": 60000,
+            "num_steps_2": 120000,
+            "weight_1": -0.045,
+            "weight_2": -0.06,
         }
     )
     arm_velocity_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "arm_velocity_penalty",
-            "num_steps_1": 40000,
-            "num_steps_2": 80000,
-            "weight_1": -0.09,
-            "weight_2": -0.12,
+            "num_steps_1": 60000,
+            "num_steps_2": 120000,
+            "weight_1": -0.075,
+            "weight_2": -0.1,
         }
     )
     arm_acceleration_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "arm_acceleration_penalty",
-            "num_steps_1": 40000,
-            "num_steps_2": 80000,
-            "weight_1": -0.00015,
-            "weight_2": -0.00020,
+            "num_steps_1": 60000,
+            "num_steps_2": 120000,
+            "weight_1": -0.000045,
+            "weight_2": -0.00006,
         }
     )
-    arm_torque_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage,
-        params={
-            "term_name": "arm_torque_penalty",
-            "num_steps_1": 40000,
-            "num_steps_2": 80000,
-            "weight_1": -0.0009,
-            "weight_2": -0.0012,
-        }
-    )
+    # arm_torque_penalty = CurrTerm(
+    #     func=mdp.modify_reward_weight_multi_stage,
+    #     params={
+    #         "term_name": "arm_torque_penalty",
+    #         "num_steps_1": 60000,
+    #         "num_steps_2": 120000,
+    #         "weight_1": -0.00006,
+    #         "weight_2": -0.00008,
+    #     }
+    # )
     gripper_action_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_action_penalty",
-            "num_steps_1": 20000,
-            "num_steps_2": 60000,
-            "weight_1": -0.04,
-            "weight_2": -0.08,
+            "num_steps_1": 90000,
+            "num_steps_2": 180000,
+            "weight_1": -0.06,
+            "weight_2": -0.12,
         }
     )
     gripper_velocity_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_velocity_penalty",
-            "num_steps_1": 20000,
-            "num_steps_2": 60000,
-            "weight_1": -0.03,
-           "weight_2": -0.06,
+            "num_steps_1": 90000,
+            "num_steps_2": 180000,
+            "weight_1": -0.02,
+            "weight_2": -0.04,
         }
     )
     gripper_acceleration_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_acceleration_penalty",
-            "num_steps_1": 20000,
-            "num_steps_2": 60000,
-            "weight_1": -0.00005,
-            "weight_2": -0.0001,
+            "num_steps_1": 90000,
+            "num_steps_2": 180000,
+            "weight_1": -0.00000045,
+            "weight_2": -0.0000009,
         }
     )
-    gripper_torque_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage,
-        params={
-            "term_name": "gripper_torque_penalty",
-            "num_steps_1": 20000,
-            "num_steps_2": 60000,
-            "weight_1": -0.0003,
-            "weight_2": -0.0006,
-        }
-    )
+    # gripper_torque_penalty = CurrTerm(
+    #     func=mdp.modify_reward_weight_multi_stage,
+    #     params={
+    #         "term_name": "gripper_torque_penalty",
+    #         "num_steps_1": 30000,
+    #         "num_steps_2": 90000,
+    #         "weight_1": -0.006,
+    #         "weight_2": -0.012,
+    #     }
+    # )
 
 
 

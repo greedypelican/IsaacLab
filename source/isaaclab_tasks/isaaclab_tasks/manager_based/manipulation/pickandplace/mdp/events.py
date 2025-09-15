@@ -8,6 +8,8 @@ from isaaclab.envs import ManagerBasedRLEnv
 
 # Global phase flags (per environment)
 phase_flags = {}
+GRASP_THRESHOLD = 1.0
+RELEASE_THRESHOLD = 0.05
 
 def reset_phase_flags(
     env: ManagerBasedRLEnv,
@@ -62,35 +64,37 @@ def check_and_update_phase_flags(
     left_force_magnitudes = torch.norm(left_forces_sum, dim=-1)
     right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
 
-    left_grasp_contact = (left_force_magnitudes >= 1.0)
-    right_grasp_contact = (right_force_magnitudes >= 1.0)
+    left_grasp_contact = (left_force_magnitudes >= GRASP_THRESHOLD)
+    right_grasp_contact = (right_force_magnitudes >= GRASP_THRESHOLD)
     grasping = left_grasp_contact & right_grasp_contact
 
-    left_release_contact = (left_force_magnitudes == 0.0)
-    right_release_contact = (right_force_magnitudes == 0.0)
+    left_release_contact = (left_force_magnitudes <= RELEASE_THRESHOLD)
+    right_release_contact = (right_force_magnitudes <= RELEASE_THRESHOLD)
     releasing = left_release_contact & right_release_contact
 
-    # Phase 2: ee_frame과 object가 가깝고 grasping 상태
-    ee_pos = ee_frame.data.target_pos_w[env_ids, 0, :]  # ee position
-    object_pos = object.data.root_pos_w[env_ids]
-    distance_ee_object = torch.norm(ee_pos - object_pos, dim=1)
+    # Phase 2: ee_frame과 object가 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    ee_pos_w = ee_frame.data.target_pos_w[env_ids, 0, :]  # (N,3)
+    object_pos = object.data.root_pos_w[env_ids]          # (N,3)
+    ee_pos_b, _ = subtract_frame_transforms(
+        robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], ee_pos_w
+    )
+    obj_pos_b, _ = subtract_frame_transforms(
+        robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], object_pos
+    )
+    distance_ee_object = torch.norm(ee_pos_b - obj_pos_b, dim=1)
     phase1_condition = (distance_ee_object < 0.03) & grasping
     phase_flags["phase1_complete"][env_ids] = phase_flags["phase1_complete"][env_ids] | phase1_condition
 
-    # Phase 3: object가 ascend command와 가깝고 grasping 상태
-    des_pos_b_ascend = ascend_command[env_ids, :3]
-    des_pos_w_ascend, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_ascend)
-    distance_ascend = torch.norm(des_pos_w_ascend - object_pos, dim=1)
+    # Phase 3: object가 ascend command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    des_pos_b_ascend = ascend_command[env_ids, :3]                    # already in robot frame
+    distance_ascend = torch.norm(des_pos_b_ascend - obj_pos_b, dim=1)
     phase2_condition = (distance_ascend < 0.03) & grasping
-    # phase1이 완료된 환경들에서만 phase2 완료 업데이트
     phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (phase2_condition & phase_flags["phase1_complete"][env_ids])
 
-    # Phase 4: object가 descend command와 가깝고 grasping 상태
-    des_pos_b_descend = descend_command[env_ids, :3]
-    des_pos_w_descend, _ = combine_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], des_pos_b_descend)
-    distance_descend = torch.norm(des_pos_w_descend - object_pos, dim=1)
+    # Phase 4: object가 descend command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    des_pos_b_descend = descend_command[env_ids, :3]                  # already in robot frame
+    distance_descend = torch.norm(des_pos_b_descend - obj_pos_b, dim=1)
     phase3_condition = (distance_descend < 0.03) & grasping
-    # phase2가 완료된 환경들에서만 phase3 완료 업데이트
     prev_phase3 = phase_flags["phase3_complete"][env_ids].clone()
     update_mask = (phase3_condition & phase_flags["phase2_complete"][env_ids]) & ~prev_phase3
     phase_flags["phase3_complete"][env_ids] = prev_phase3 | (phase3_condition & phase_flags["phase2_complete"][env_ids])

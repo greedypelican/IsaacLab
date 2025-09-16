@@ -6,25 +6,25 @@
 from dataclasses import MISSING
 import math
 
-from numpy import argmin
-import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg, RigidObjectCfg
-from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
-from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
-from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import CurriculumTermCfg as CurrTerm
-from isaaclab.managers import EventTermCfg as EventTerm
-from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.managers import SceneEntityCfg
-from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.sensors import ContactSensorCfg
-from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
+import isaaclab.sim as sim_utils
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg, RigidObjectCfg
+from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
+from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 
 from . import mdp
 
@@ -49,7 +49,7 @@ MARKER_CFG = VisualizationMarkersCfg(
 # Scene definition
 ##
 @configclass
-class ObjectTableSceneCfg(InteractiveSceneCfg):
+class SceneCfg(InteractiveSceneCfg):
     """Configuration for the lift scene with a robot and a object.
     This is the abstract base implementation, the exact scene is defined in the derived classes
     which need to set the target object, robot and end-effector frames
@@ -87,38 +87,9 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
-    contact_forces_arm = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)", 
-        update_period=0.0, 
-        history_length=1, 
-        debug_vis=False, 
-    )
-    contact_forces_outer_gripper = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/(left_inner_finger|left_outer_knuckle|left_outer_finger|right_inner_finger|right_outer_knuckle|right_outer_finger)", 
-        update_period=0.0, 
-        history_length=1, 
-        debug_vis=False, 
-    )
-    contact_forces_inner_gripper = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/(left_inner_knuckle|right_inner_knuckle|gripper_base_link)", 
-        update_period=0.0, 
-        history_length=1, 
-        debug_vis=False, 
-    )
-    contact_forces_left_finger_pad = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/left_finger_pad", 
-        update_period=0.0, 
-        history_length=1, 
-        debug_vis=True, 
-        filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
-    )
-    contact_forces_right_finger_pad = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/right_finger_pad", 
-        update_period=0.0, 
-        history_length=1, 
-        debug_vis=True, 
-        filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
-    )
+    contact_forces_arm: ContactSensorCfg = MISSING
+    contact_forces_left_finger_pad: ContactSensorCfg = MISSING
+    contact_forces_right_finger_pad: ContactSensorCfg = MISSING
 
 
 ##
@@ -129,22 +100,22 @@ class CommandsCfg:
     """Command terms for the MDP."""
 
     ascend = mdp.UniformPoseCommandCfg(
-        asset_name="robot", 
-        body_name=MISSING, 
-        resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC), 
-        debug_vis=True, 
+        asset_name="robot",
+        body_name=MISSING,
+        resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
+        debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.3, 0.3), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
-        ), 
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.3, 0.3), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+        ),
     )
     descend = mdp.UniformPoseCommandCfg(
-        asset_name="robot", 
-        body_name=MISSING, 
-        resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC), 
-        debug_vis=True, 
+        asset_name="robot",
+        body_name=MISSING,
+        resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
+        debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)  # radian
-        ), 
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+        ),
     )
 
     def __post_init__(self):
@@ -172,10 +143,10 @@ class ObservationsCfg:
 
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
-        object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame)
-        lift_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
-        place_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
+        initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
+        initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
+        ascend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
+        descend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
         current_phase = ObsTerm(func=mdp.current_phase)
         actions = ObsTerm(func=mdp.last_action)
 
@@ -183,7 +154,6 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
 
-    # observation groups
     policy: PolicyCfg = PolicyCfg()
 
 
@@ -192,16 +162,16 @@ class EventCfg:
     """Configuration for events."""
 
     reset_all = EventTerm(
-        func=mdp.reset_scene_to_default, 
-        mode="reset", 
+        func=mdp.reset_scene_to_default,
+        mode="reset",
     )
     reset_object_position = EventTerm(
-        func=mdp.reset_root_state_uniform, 
-        mode="reset", 
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
         params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)}, 
-            "velocity_range": {}, 
-            "asset_cfg": SceneEntityCfg("object", body_names="Object"), 
+            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0), "roll": (-math.pi, math.pi)},
+            "velocity_range": {},
         },
     )
     cache_object_initial_pose = EventTerm(
@@ -209,22 +179,21 @@ class EventCfg:
         mode="reset",
     )
     reset_phase_flags = EventTerm(
-        func=mdp.reset_phase_flags, 
-        mode="reset", 
+        func=mdp.reset_phase_flags,
+        mode="reset",
     )
     check_and_update_phase_flags = EventTerm(
-        func=mdp.check_and_update_phase_flags, 
-        mode="interval", 
-        interval_range_s=(DELTA_TIME, DELTA_TIME), 
-        is_global_time=False, 
+        func=mdp.check_and_update_phase_flags,
+        mode="interval",
+        interval_range_s=(DELTA_TIME, DELTA_TIME),
+        is_global_time=False,
     )
 
 
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
-    
-    # Phase-based basic rewards for task progression
+
     phase = RewTerm(
         func=mdp.phase_complete,
         weight=1.0,
@@ -242,7 +211,7 @@ class RewardsCfg:
         weight=1.0,
     )
     track = RewTerm(
-        func=mdp.object_track, 
+        func=mdp.object_track,
         weight=1.0,
     )
     goback = RewTerm(
@@ -253,31 +222,31 @@ class RewardsCfg:
         func=mdp.joint_similarity,
         weight=1.0,
     )
-    
+
     ee_alignment_penalty = RewTerm(
-        func=mdp.world_ee_z_axis_alignment_penalty, 
-        params=MISSING, 
+        func=mdp.world_ee_z_axis_alignment_penalty,
+        params={"body_name": MISSING},
         weight=-1.0, 
     )
     arm_action_penalty = RewTerm(
-        func=mdp.action_rate_penalty, 
-        params={"action_type": "arm_actions"}, 
-        weight=-0.05, 
+        func=mdp.action_rate_penalty,
+        params={"action_type": "arm"},
+        weight=-0.05,
     )
     arm_velocity_penalty = RewTerm(
-        func=mdp.joint_velocity_penalty, 
-        params={"joint_type": "arm_joints"}, 
-        weight=-0.05, 
+        func=mdp.joint_velocity_penalty,
+        params={"joint_type": "arm"},
+        weight=-0.05,
     )
     gripper_action_penalty = RewTerm(
-        func=mdp.action_rate_penalty, 
-        params={"action_type": "gripper_actions"}, 
-        weight=-0.0, 
+        func=mdp.action_rate_penalty,
+        params={"action_type": "gripper"},
+        weight=-0.0,
     )
     gripper_velocity_penalty = RewTerm(
-        func=mdp.joint_velocity_penalty, 
-        params={"joint_type": "gripper_joints"}, 
-        weight=-0.0, 
+        func=mdp.joint_velocity_penalty,
+        params={"joint_type": "gripper"},
+        weight=-0.0,
     )
 
 
@@ -286,24 +255,21 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(
-        func=mdp.time_out_with_phase_logging, 
-        time_out=True, 
+        func=mdp.time_out_with_phase_logging,
+        time_out=True,
     )
 
     object_dropping = DoneTerm(
-        func=mdp.object_drop, 
-        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05, "contact_threshold": 0.01}, 
+        func=mdp.object_drop,
+        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05},
     )
     object_out_of_bounds = DoneTerm(
-        func=mdp.object_out_of_bounds, 
-        params={"object_cfg": SceneEntityCfg("object")}, 
+        func=mdp.object_out_of_bounds,
+        params={"object_cfg": SceneEntityCfg("object")},
     )
     arm_contact = DoneTerm(
-        func=mdp.illegal_contact, 
-        params={"sensor_cfg": SceneEntityCfg("contact_forces_arm", 
-                                  body_names=["arm_base_link", "shoulder_link", "bicep_link", 
-                                      "forearm_link", "spherical_wrist_.*", "bracelet_with_vision_link"]), 
-                "threshold": 1.0}, 
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces_arm"), "threshold": 1.0},
     )
     object_move_after_place = DoneTerm(
         func=mdp.object_move_after_place,
@@ -314,37 +280,36 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-
     arm_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage, 
-        params={"term_name": "arm_action_penalty", 
-                "num_steps_1": 40000, 
-                "num_steps_2": 80000, 
-                "weight_1": -0.07, 
+        func=mdp.modify_reward_weight_multi_stage,
+        params={"term_name": "arm_action_penalty",
+                "num_steps_1": 100000,
+                "num_steps_2": 200000,
+                "weight_1": -0.07,
                 "weight_2": -0.1,}
     )
     arm_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage, 
-        params={"term_name": "arm_velocity_penalty", 
-                "num_steps_1": 40000, 
-                "num_steps_2": 80000, 
-                "weight_1": -0.07, 
+        func=mdp.modify_reward_weight_multi_stage,
+        params={"term_name": "arm_velocity_penalty",
+                "num_steps_1": 100000,
+                "num_steps_2": 200000,
+                "weight_1": -0.07,
                 "weight_2": -0.1,}
     )
     gripper_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage, 
-        params={"term_name": "gripper_action_penalty", 
-                "num_steps_1": 20000, 
-                "num_steps_2": 60000, 
-                "weight_1": -0.04, 
+        func=mdp.modify_reward_weight_multi_stage,
+        params={"term_name": "gripper_action_penalty",
+                "num_steps_1": 50000,
+                "num_steps_2": 150000,
+                "weight_1": -0.04,
                 "weight_2": -0.08,}
     )
     gripper_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight_multi_stage, 
-        params={"term_name": "gripper_velocity_penalty", 
-                "num_steps_1": 20000, 
-                "num_steps_2": 60000, 
-                "weight_1": -0.03, 
+        func=mdp.modify_reward_weight_multi_stage,
+        params={"term_name": "gripper_velocity_penalty",
+                "num_steps_1": 50000,
+                "num_steps_2": 150000,
+                "weight_1": -0.03,
                 "weight_2": -0.06,}
     )
 
@@ -356,7 +321,7 @@ class CurriculumCfg:
 class PickAndPlaceEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the lifting environment."""
 
-    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=4096, env_spacing=2.0)
+    scene: SceneCfg = SceneCfg(num_envs=4096, env_spacing=2.0)
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
@@ -380,8 +345,8 @@ class PickAndPlaceEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.friction_correlation_distance = 0.00625
 
         self.scene.contact_forces_arm.update_period = self.sim.dt
-        self.scene.contact_forces_outer_gripper.update_period = self.sim.dt
-        self.scene.contact_forces_inner_gripper.update_period = self.sim.dt
+        self.scene.contact_forces_left_finger_pad.update_period = self.sim.dt
+        self.scene.contact_forces_right_finger_pad.update_period = self.sim.dt
         self.scene.contact_forces_arm.history_length = self.decimation
-        self.scene.contact_forces_outer_gripper.history_length = self.decimation
-        self.scene.contact_forces_inner_gripper.history_length = self.decimation
+        self.scene.contact_forces_left_finger_pad.history_length = self.decimation
+        self.scene.contact_forces_right_finger_pad.history_length = self.decimation

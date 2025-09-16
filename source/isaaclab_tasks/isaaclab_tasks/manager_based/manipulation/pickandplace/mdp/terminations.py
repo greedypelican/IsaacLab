@@ -18,7 +18,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms, subtract_frame_transforms
 from isaaclab.envs import ManagerBasedRLEnv
 
-from .events import phase_flags
+from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD
 
 def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Time out termination with phase metrics logging.
@@ -102,7 +102,7 @@ def object_drop(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     height_threshold: float = 0.05,
-    contact_threshold: float = 0.01,
+    contact_threshold: float = RELEASE_THRESHOLD,
 ) -> torch.Tensor:
     """Terminate when object is dropped (contact lost while object is above height threshold).
     
@@ -137,8 +137,8 @@ def object_drop(
     right_force_magnitudes = torch.norm(right_forces_sum, dim=-1)
     
     # Check if both fingers are in contact
-    left_contact = (left_force_magnitudes > contact_threshold)
-    right_contact = (right_force_magnitudes > contact_threshold)
+    left_contact = (left_force_magnitudes >= contact_threshold)
+    right_contact = (right_force_magnitudes >= contact_threshold)
     both_contact = left_contact & right_contact
     
     # Object is dropped if:
@@ -149,9 +149,31 @@ def object_drop(
     
     return object_drop
 
+# def object_move_after_place(
+#     env: ManagerBasedRLEnv,
+#     move_threshold: float = 0.2,
+#     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+#     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+# ) -> torch.Tensor:
+#     """Terminate after Phase 3 if object XY is farther than threshold from descend command (robot root frame)."""
+#     if not phase_flags or "phase3_complete" not in phase_flags:
+#         return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+#     robot = env.scene[robot_cfg.name]
+#     obj = env.scene[object_cfg.name]
+
+#     descend_command = env.command_manager.get_command("descend")  # (N, ≥3) in robot frame
+#     des_pos_b = descend_command[:, :3]
+
+#     obj_pos_b, _ = subtract_frame_transforms(robot.data.root_pos_w, robot.data.root_quat_w, obj.data.root_pos_w[:, :3])
+
+#     dist_xy_b = torch.linalg.norm(obj_pos_b[:, :2] - des_pos_b[:, :2], dim=1)
+#     terminate = phase_flags["phase3_complete"] & (dist_xy_b > move_threshold)
+#     return terminate
+
 def object_move_after_place(
     env: ManagerBasedRLEnv,
-    move_threshold: float = 0.03,
+    move_threshold: float = 0.05,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:

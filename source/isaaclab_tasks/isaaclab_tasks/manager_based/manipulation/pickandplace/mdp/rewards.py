@@ -17,7 +17,7 @@ from isaaclab.utils.math import matrix_from_quat
 from isaaclab.utils.math import quat_inv
 from isaaclab.envs import ManagerBasedRLEnv
 
-from .events import phase_flags
+from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD
 
 
 def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
@@ -31,10 +31,10 @@ def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
         "ascend_phase": phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"],
         "descend_phase": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
         "place_phase": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
-        "ready_phase": phase_flags["phase4_complete"], 
+        "ready_phase": phase_flags["phase4_complete"],
     }
 
-def _is_grasping(env: ManagerBasedRLEnv, contact_threshold: float = 0.3) -> torch.Tensor:
+def _is_grasping(env: ManagerBasedRLEnv, contact_threshold: float = GRASP_THRESHOLD) -> torch.Tensor:
     """Return a boolean tensor per env indicating if both finger pads exceed threshold."""
     left_finger_sensor = env.scene.sensors["contact_forces_left_finger_pad"]
     right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
@@ -49,53 +49,48 @@ def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Basic reward for phase completion to encourage progression through pick and place phases.
     
     Provides base rewards for each phase completion:
-    - Pick phase complete: 1.0 reward
-    - Ascend phase complete: 5.0 reward
-    - Descend phase complete: 10.0 reward
-    - Place phase complete: 20.0 reward (final success)
+    - Pick phase complete: 4.0 reward
+    - Ascend phase complete: 9.0 reward
+    - Descend phase complete: 16.0 reward
+    - Place phase complete: 25.0 reward
     """
     phases = _phase_states(env)
     
     # Calculate cumulative phase rewards with different weights
     phase_rewards = torch.zeros(env.num_envs, device=env.device)
     phase_rewards += torch.where(phases["ascend_phase"], 4.0, 0.0)
-    phase_rewards += torch.where(phases["descend_phase"], 8.0, 0.0)
-    phase_rewards += torch.where(phases["place_phase"], 14.0, 0.0)
-    phase_rewards += torch.where(phases["ready_phase"], 20.0, 0.0)
+    phase_rewards += torch.where(phases["descend_phase"], 9.0, 0.0)
+    phase_rewards += torch.where(phases["place_phase"], 16.0, 0.0)
+    phase_rewards += torch.where(phases["ready_phase"], 25.0, 0.0)
 
     return phase_rewards
 
 def ee_distance(
-    env: ManagerBasedRLEnv, 
-    std: float = 0.5, 
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"), 
-    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"), 
+    env: ManagerBasedRLEnv,
+    std: float = 0.5,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
-    """Reward the agent for reaching the object using tanh-kernel.
-    
-    phase_flags에 따라 mode를 동적으로 결정:
-    - Pick/Ascend/Descend phase (phase3_complete가 False): reach mode
-    - Place phase (phase3_complete가 True): leave mode
-    """
     phases = _phase_states(env)
-    
+
     object: RigidObject = env.scene[object_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
-    
-    cube_pos_w = object.data.root_pos_w
-    ee_w = ee_frame.data.target_pos_w[..., 0, :]
-    object_ee_distance = torch.norm(cube_pos_w - ee_w, dim=1)
-    
-    # 벡터화된 reward 계산
-    reach_reward = 1 - torch.tanh(object_ee_distance / std)
-    # leave_reward = torch.tanh((torch.clamp(object_ee_distance, max=0.15)/0.15) / std) - 1
+    robot: RigidObject = env.scene["robot"]
 
-    reward = torch.where(phases["pick_phase"], reach_reward*2.5, 0.0)
+    obj_pos_w = object.data.root_pos_w
+    ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
+
+    obj_pos_b, _ = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), obj_pos_w - robot.data.root_pos_w)
+    ee_pos_b, _  = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
+
+    dist_b = torch.norm(obj_pos_b - ee_pos_b, dim=1)
+    reach_reward = 1 - torch.tanh(dist_b / std)
+    reward = torch.where(phases["pick_phase"], reach_reward*1.5, 0.0)
     return reward
 
 def object_contact(
-    env: ManagerBasedRLEnv, 
-    contact_threshold: float = 1.0, 
+    env: ManagerBasedRLEnv,
+    contact_threshold: float = GRASP_THRESHOLD,
 ) -> torch.Tensor:
     """Linear reward for contacting the object using contact sensor.
     
@@ -132,12 +127,12 @@ def object_contact(
     left_contact_reward = torch.square(left_force_norm) * 0.5
     right_contact_reward = torch.square(right_force_norm) * 0.5
     
-    left_reward = torch.where(phases["pick_phase"], left_contact_reward*1.5, 
-                      torch.where(phases["ascend_phase"] | phases["descend_phase"], right_contact_reward*0.5, 
-                          torch.where(phases["place_phase"], left_contact_reward*-1.0, 0.0)))
-    right_reward = torch.where(phases["pick_phase"], left_contact_reward*1.5, 
-                      torch.where(phases["ascend_phase"] | phases["descend_phase"], right_contact_reward*0.5, 
-                          torch.where(phases["place_phase"], right_contact_reward*-1.0, 0.0)))
+    left_reward = torch.where(phases["pick_phase"], left_contact_reward*2.5,
+                      torch.where(phases["ascend_phase"] | phases["descend_phase"], left_contact_reward*0.5,
+                          torch.where(phases["place_phase"], left_contact_reward*-1.5, 0.0)))
+    right_reward = torch.where(phases["pick_phase"], right_contact_reward*2.5,
+                      torch.where(phases["ascend_phase"] | phases["descend_phase"], right_contact_reward*0.5,
+                          torch.where(phases["place_phase"], right_contact_reward*-1.5, 0.0)))
     reward = left_reward + right_reward
     return reward
 
@@ -145,41 +140,29 @@ def object_height(
     env: ManagerBasedRLEnv,
     ascend_threshold: float = 0.03,
     descend_threshold: float = 0.05,
-    contact_threshold: float = 0.3,
+    place_threshold: float = 0.02,
 ) -> torch.Tensor:
-    """Height-based reward that uses EE height only when grasping.
-
-    - Pick/Ascend phase: if grasping, reward when ee height > ``ascend_threshold`` (and < 0.4).
-    - Descend/Place phase: if grasping, reward when ee height < ``descend_threshold``.
-    - Not grasping: reward is 0 (object height is never used; sim-to-real 고려).
-    """
     phases = _phase_states(env)
-
-    # EE height
     ee_frame: FrameTransformer = env.scene["ee_frame"]
-    height = ee_frame.data.target_pos_w[:, 0, 2]
+    robot: RigidObject = env.scene["robot"]
 
-    # Grasping detection from finger pad contact sensors
-    grasping = _is_grasping(env, contact_threshold)
+    ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
+    ee_pos_b, _ = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
+    height_b = ee_pos_b[:, 2]
 
-    ascend_reward = torch.where((height > ascend_threshold) & (height < 0.4), 1.0, 0.0)
-    descend_reward = torch.where(height < descend_threshold, 1.0, 0.0)
-    # base = torch.where(
-    #     phases["descend_phase"],
-    #     descend_reward * 2.0,
-    #     torch.where(phases["ascend_phase"], ascend_reward, 0.0),
-    # )
-    # reward = torch.where(grasping, base, torch.zeros_like(base))
-
-    reward = torch.where(grasping & phases["ascend_phase"], ascend_reward, 
-                 torch.where(grasping & phases["descend_phase"], descend_reward, 0.0))
+    grasping = _is_grasping(env)
+    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.4), 1.0, 0.0)
+    descend_reward = torch.where(height_b <= descend_threshold, 1.0, 0.0)
+    place_reward = torch.where(height_b >= place_threshold, 1.0, 0.0)
+    reward = torch.where(grasping & phases["ascend_phase"], ascend_reward,
+                 torch.where(grasping & phases["descend_phase"], descend_reward,
+                     torch.where(phases["place_phase"] | phases["ready_phase"], place_reward, 0.0)))
     return reward
 
 def object_track(
-    env: ManagerBasedRLEnv, 
-    std: float = 0.3, 
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
-    contact_threshold: float = 0.3, 
+    env: ManagerBasedRLEnv,
+    std: float = 0.3,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Reward the agent for tracking the goal pose using tanh-kernel.
     
@@ -193,15 +176,15 @@ def object_track(
     ee_frame: FrameTransformer = env.scene["ee_frame"]
     
     ascend_command = env.command_manager.get_command("ascend")
-    descend_command = env.command_manager.get_command("descend")
-    command = torch.where(phases["descend_phase"].unsqueeze(-1).expand(-1, ascend_command.shape[-1]), 
-                         descend_command, ascend_command)
+    descend_command = env.command_manager.get_command("descend")        
+    command = torch.where(phases["ascend_phase"].unsqueeze(-1).expand(-1, descend_command.shape[-1]),
+                          ascend_command, descend_command)
     
     target_pos_b = command[:, :3]
     ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
 
     # Grasping detection from finger pad contact sensors
-    grasping = _is_grasping(env, contact_threshold)
+    grasping = _is_grasping(env)
 
     robot_pos_w = robot.data.root_pos_w
     robot_quat_w = robot.data.root_quat_w
@@ -218,57 +201,15 @@ def object_track(
     height_diff = torch.abs(object_pos_b[:, 2] - target_pos_b[:, 2])
     command_reward = 1 - torch.tanh((distance + height_diff) / std)
 
-    # base = torch.where(
-    #     phases["descend_phase"],
-    #     command_reward * 2.0,
-    #     torch.where(phases["ascend_phase"], command_reward, command_reward / 2),
-    # )
-    # reward = torch.where(grasping, base, torch.zeros_like(base))
-
-    reward = torch.where(grasping & (phases["ascend_phase"] | phases["descend_phase"]), command_reward*2.5, 0.0)
+    reward = torch.where(grasping & (phases["ascend_phase"] | phases["descend_phase"]), command_reward*2.5, 
+                 torch.where(grasping & phases["place_phase"], command_reward*0.5, 0.0))
     return reward
 
-# def object_place(
-#     env: ManagerBasedRLEnv, 
-#     object_cfg: SceneEntityCfg = SceneEntityCfg("object"), 
-# ) -> torch.Tensor:
-#     """Reward for successfully placing the object at the target location.
-    
-#     Only activates rewards when in the place phase (is_place_phase = True).
-#     """
-#     phases = _phase_states(env)
-
-#     object: RigidObject = env.scene[object_cfg.name]
-#     robot: RigidObject = env.scene["robot"]
-#     place_command = env.command_manager.get_command("descend")
-    
-#     target_pos_b = place_command[:, :3]
-#     object_pos_w = object.data.root_pos_w
-#     robot_pos_w = robot.data.root_pos_w
-#     robot_quat_w = robot.data.root_quat_w
-
-#     object_pos_relative = object_pos_w - robot_pos_w  # Translate
-#     robot_quat_inv = quat_inv(robot_quat_w)
-#     object_pos_b, _ = combine_frame_transforms(
-#         torch.zeros_like(robot_pos_w),  # No translation needed
-#         robot_quat_inv,  # Use inverse quaternion
-#         object_pos_relative
-#     )
-    
-#     xy_distance = torch.norm(object_pos_b[:, :2] - target_pos_b[:, :2], dim=1)
-#     height_diff = torch.abs(object_pos_b[:, 2] - target_pos_b[:, 2])
-#     placement_reward = torch.where((xy_distance < 0.03) & (height_diff < 0.03), 1.0, 0.0)
-
-#     reward = torch.where(phases["goback_phase"], placement_reward, 
-#                  torch.where(phases["place_phase"], placement_reward/5, 0.0))
-
-#     return reward
-
 def initial_pose(
-    env: ManagerBasedRLEnv, 
+    env: ManagerBasedRLEnv,
     std: float = 1.0,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
-    joint_names: list[str] | None = None, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    joint_names: list[str] | None = None,
 ) -> torch.Tensor:
     """Reward closeness to the initial joint positions.
 
@@ -307,20 +248,15 @@ def initial_pose(
     # Calculate deviation using L2 norm
     deviation_norm = torch.linalg.norm(joint_deviation, dim=1)
 
-    # Only apply reward in goback phase
-    if not torch.any(phases["place_phase"]):
-        return torch.zeros(env.num_envs, device=env.device)
-
     # Convert deviation to reward: small deviation -> high reward (in [0, 1))
     proximity_reward = 1.0 - torch.tanh(deviation_norm / std)
-    # reward = torch.where(phases["ready_phase"], proximity_reward*2.0, 
-    #              torch.where(phases["goback_phase"], proximity_reward, 0.0))
+
     reward = torch.where(phases["place_phase"], proximity_reward*5.0, 
                  torch.where(phases["ready_phase"], proximity_reward*6.0, 0.0))
     return reward
 
 def joint_similarity(
-    env: ManagerBasedRLEnv, 
+    env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg  = SceneEntityCfg("robot"),
     joint_names: list[str] | None = None,
     std: float = 0.3,
@@ -356,9 +292,9 @@ def joint_similarity(
 
 
 def world_ee_z_axis_alignment_penalty(
-    env: ManagerBasedRLEnv, 
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
-    body_name: str = "gripper_base_link", 
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    body_name: str = "gripper_base_link",
 ) -> torch.Tensor:
     """Penalty for EE -X-axis not being aligned with world +Z-axis.
     
@@ -411,8 +347,8 @@ def world_ee_z_axis_alignment_penalty(
 
 
 def object_world_z_axis_alignment_penalty(
-    env: ManagerBasedRLEnv, 
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"), 
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Penalty for object's Z-axis not being aligned with world Z-axis.
     
@@ -457,12 +393,12 @@ def object_world_z_axis_alignment_penalty(
 
 
 
-def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all_actions") -> torch.Tensor:
+def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all") -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel.
     
     Args:
         env: The environment.
-        action_type: Type of action to calculate rate for. Options: "arm_actions", "gripper_actions", "all_actions"
+        action_type: Type of action to calculate rate for. Options: "arm", "gripper", "all"
     
     Returns:
         Action rate penalty for the specified action type.
@@ -472,34 +408,59 @@ def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all_actions"
     current_action = env.action_manager.action
     prev_action = env.action_manager.prev_action
     
-    if action_type == "arm_actions":
+    if action_type == "arm":
         # arm_action에 대한 action rate 계산
         # arm_action은 action vector의 앞부분 (gripper 제외)
         arm_action_dim = current_action.shape[1] - 1  # 마지막 1개는 gripper
         action_diff = current_action[:, :arm_action_dim] - prev_action[:, :arm_action_dim]
         
-    elif action_type == "gripper_actions":
+    elif action_type == "gripper":
         # gripper_action에 대한 action rate 계산
         # gripper_action은 action vector의 마지막 부분
         gripper_action_dim = 1  # BinaryJointPositionActionCfg는 보통 1차원
         action_diff = current_action[:, -gripper_action_dim:] - prev_action[:, -gripper_action_dim:]
         
-    elif action_type == "all_actions":
+    elif action_type == "all":
         # 모든 action에 대한 action rate 계산 (기본값)
         action_diff = current_action - prev_action
         
     else:
-        raise ValueError(f"Unknown action_type: {action_type}. Must be 'arm_action', 'gripper_action', or 'all_actions'")
+        raise ValueError(f"Unknown action_type: {action_type}. Must be 'arm', 'gripper', or 'all'")
     
     penalty = torch.mean(torch.square(action_diff), dim=1)
     return torch.where(phases["ready_phase"], penalty*3.0, penalty)
 
-def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all_joints") -> torch.Tensor:
+def joint_torques_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
+    """Penalize joint torques on the articulation."""
+    phases = _phase_states(env)
+
+    asset: Articulation = env.scene["robot"]
+
+    if joint_type == "arm":
+        # arm joints에 대한 velocity penalty 계산
+        joint_names = ["joint_.*"]  # arm joint 패턴
+    elif joint_type == "gripper":
+        # gripper joints에 대한 velocity penalty 계산
+        joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
+    elif joint_type == "all":
+        # 모든 joint에 대한 velocity penalty 계산
+        joint_names = ["joint_.*", "left_outer_knuckle_joint"]
+    else:
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
+
+    joint_ids, _ = asset.find_joints(joint_names)
+    if len(joint_ids) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    penalty = torch.mean(torch.square(asset.data.applied_torque[:, joint_ids]), dim=1)
+    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+
+def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint velocities on the articulation based on joint type.
     
     Args:
         env: The environment.
-        joint_type: Type of joints to penalize. Options: "arm_joints", "gripper_joints", "all_joints"
+        joint_type: Type of joints to penalize. Options: "arm", "gripper", "all"
     
     Returns:
         Velocity penalty for the specified joint type.
@@ -508,50 +469,46 @@ def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all_joints
 
     asset: Articulation = env.scene["robot"]
     
-    if joint_type == "arm_joints":
+    if joint_type == "arm":
         # arm joints에 대한 velocity penalty 계산
         joint_names = ["joint_.*"]  # arm joint 패턴
-    elif joint_type == "gripper_joints":
+    elif joint_type == "gripper":
         # gripper joints에 대한 velocity penalty 계산
         joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
-    elif joint_type == "all_joints":
+    elif joint_type == "all":
         # 모든 joint에 대한 velocity penalty 계산
         joint_names = ["joint_.*", "left_outer_knuckle_joint"]
     else:
-        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm_joints', 'gripper_joints', or 'all_joints'")
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
     
     joint_ids, _ = asset.find_joints(joint_names)
     if len(joint_ids) == 0:
         return torch.zeros(env.num_envs, device=env.device)
     
     penalty = torch.mean(torch.square(asset.data.joint_vel[:, joint_ids]), dim=1)
-    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)
 
-def joint_acceleration_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+def joint_acceleration_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint accelerations on the articulation."""
-    asset: Articulation = env.scene[asset_cfg.name]
-    
-    if asset_cfg.joint_names is not None:
-        joint_ids, _ = asset.find_joints(asset_cfg.joint_names)
-        if len(joint_ids) == 0:
-            return torch.zeros(env.num_envs, device=env.device)
-    else:
-        joint_ids = slice(None)
-    
-    penalty = torch.linalg.norm(asset.data.joint_acc[:, joint_ids], dim=1)
-    return torch.clamp(penalty, max=50.0)
+    phases = _phase_states(env)
 
-def joint_torques_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalize joint torques on the articulation."""
-    asset: Articulation = env.scene[asset_cfg.name]
-    
-    if asset_cfg.joint_names is not None:
-        joint_ids, _ = asset.find_joints(asset_cfg.joint_names)
-        if len(joint_ids) == 0:
-            return torch.zeros(env.num_envs, device=env.device)
+    asset: Articulation = env.scene["robot"]
+
+    if joint_type == "arm":
+        # arm joints에 대한 velocity penalty 계산
+        joint_names = ["joint_.*"]  # arm joint 패턴
+    elif joint_type == "gripper":
+        # gripper joints에 대한 velocity penalty 계산
+        joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
+    elif joint_type == "all":
+        # 모든 joint에 대한 velocity penalty 계산
+        joint_names = ["joint_.*", "left_outer_knuckle_joint"]
     else:
-        joint_ids = slice(None)
+        raise ValueError(f"Unknown joint_type: {joint_type}. Must be 'arm', 'gripper', or 'all'")
+
+    joint_ids, _ = asset.find_joints(joint_names)
+    if len(joint_ids) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
     
-    penalty = torch.linalg.norm(asset.data.applied_torque[:, joint_ids], dim=1)
-    
-    return torch.clamp(penalty, max=200.0)
+    penalty = torch.mean(torch.square(asset.data.joint_acc[:, joint_ids]), dim=1)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)

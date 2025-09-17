@@ -143,15 +143,19 @@ class KinovaGen3N6ArmOnlyRewardsCfg(RewardsCfg):
     end_effector_orientation_tracking_fine_grained = RewTerm(
         func=kinovagen3n6_mdp.orientation_command_error_tanh,
         weight=3.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_base_link"]), "std": 0.1, "command_name": "ee_pose"},
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_base_link"]), "std": 0.3, "command_name": "ee_pose"},
     )
-    action_penaly = RewTerm(
+    action_penalty = RewTerm(
         func=kinovagen3n6_mdp.action_rate_penalty,
         weight=-0.05,
     )
     velocity_penalty = RewTerm(
         func=kinovagen3n6_mdp.joint_velocity_penalty,
         weight=-0.02,
+    )
+    acceleration_penalty = RewTerm(
+        func=kinovagen3n6_mdp.joint_acceleration_penalty,
+        weight=-0.0,
     )
 
     def __post_init__(self):
@@ -191,17 +195,22 @@ class KinovaGen3N6ArmOnlyCurriculumCfg(CurriculumCfg):
     """Curriculum terms for 6DOF arm-only reach task."""
 
     # Disable curriculum completely - penalties are unstable
-    # action_rate = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "action_rate", "weight": -0.01, "num_steps": 20000}
-    # )
-    # joint_vel = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "joint_vel", "weight": -0.0001, "num_steps": 30000}
-    # )
+    action_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "action_penalty", "weight": -0.25, "num_steps": 70000}
+    )
+    velocity_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "velocity_penalty", "weight": -0.04, "num_steps": 70000}
+    )
+    acceleration_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "acceleration_penalty", "weight": -0.00002, "num_steps": 150000}
+    )
 
     def __post_init__(self):
-        pass  # Curriculum disabled
+        self.action_rate = None
+        self.joint_vel = None
 
 
 
@@ -213,7 +222,7 @@ class KinovaGen3N6ArmOnlyReachEnvCfg(ReachEnvCfg):
     events: KinovaGen3N6ArmOnlyEventCfg = KinovaGen3N6ArmOnlyEventCfg()
     rewards: KinovaGen3N6ArmOnlyRewardsCfg = KinovaGen3N6ArmOnlyRewardsCfg()
     terminations: KinovaGen3N6ArmOnlyTerminationsCfg = KinovaGen3N6ArmOnlyTerminationsCfg()
-    curriculum = None  # Disable curriculum completely
+    curriculum: KinovaGen3N6ArmOnlyCurriculumCfg = KinovaGen3N6ArmOnlyCurriculumCfg()
 
     def __post_init__(self):
         super().__post_init__()

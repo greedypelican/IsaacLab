@@ -17,6 +17,19 @@ from isaaclab.utils.math import wrap_to_pi, quat_error_magnitude, quat_mul
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+def orientation_command_error_tanh(env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Reward tracking of the orientation using the tanh kernel."""
+
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    des_quat_b = command[:, 3:7]
+    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
+    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
+    distance = quat_error_magnitude(curr_quat_w, des_quat_w)
+
+    penalty = 1 - torch.tanh(distance / std)
+    return penalty
 
 def action_rate_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
@@ -42,16 +55,16 @@ def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_names=[".*"]) -> torch.
     penalty = torch.mean(torch.square(torch.clamp(joint_vel, -10.0, 10.0)), dim=1)
     return penalty
 
-def orientation_command_error_tanh(env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Reward tracking of the orientation using the tanh kernel."""
+def joint_acceleration_penalty(env: ManagerBasedRLEnv, joint_names=[".*"]) -> torch.Tensor:
+    """Penalize joint accelerations on the articulation."""
 
-    asset: RigidObject = env.scene[asset_cfg.name]
-    command = env.command_manager.get_command(command_name)
+    asset: Articulation = env.scene["robot"]
 
-    des_quat_b = command[:, 3:7]
-    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
-    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]
-    distance = quat_error_magnitude(curr_quat_w, des_quat_w)
+    joint_ids, _ = asset.find_joints(joint_names)
+    if len(joint_ids) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    joint_acc = torch.nan_to_num(asset.data.joint_acc[:, joint_ids], nan=0.0, posinf=0.0, neginf=0.0)
 
-    penalty = 1 - torch.tanh(distance / std)
+    penalty = torch.mean(torch.square(torch.clamp(joint_acc, -50.0, 50.0)), dim=1)
     return penalty

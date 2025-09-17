@@ -140,7 +140,7 @@ def object_height(
     env: ManagerBasedRLEnv,
     ascend_threshold: float = 0.03,
     descend_threshold: float = 0.05,
-    place_threshold: float = 0.02,
+    place_threshold: float = 0.015,
 ) -> torch.Tensor:
     phases = _phase_states(env)
     ee_frame: FrameTransformer = env.scene["ee_frame"]
@@ -252,7 +252,7 @@ def initial_pose(
     proximity_reward = 1.0 - torch.tanh(deviation_norm / std)
 
     reward = torch.where(phases["place_phase"], proximity_reward*5.0, 
-                 torch.where(phases["ready_phase"], proximity_reward*6.0, 0.0))
+                 torch.where(phases["ready_phase"], proximity_reward*7.0, 0.0))
     return reward
 
 def joint_similarity(
@@ -287,7 +287,7 @@ def joint_similarity(
     # Tanh-shaped mapping with std: smaller std -> sharper saturation
     # cos=1 -> ~0, cos=0 -> 0.5, cos=-1 -> ~1
     similarity_reward = 0.5 * (1.0 - torch.tanh(cos_sim / std))
-    reward = torch.where(phases["ready_phase"], similarity_reward*-1.0, 0.0)
+    reward = torch.where(phases["ready_phase"], similarity_reward*-100.0, 0.0)
     return reward
 
 
@@ -428,7 +428,7 @@ def action_rate_penalty(env: ManagerBasedRLEnv, action_type: str = "all") -> tor
         raise ValueError(f"Unknown action_type: {action_type}. Must be 'arm', 'gripper', or 'all'")
     
     penalty = torch.mean(torch.square(action_diff), dim=1)
-    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)
 
 def joint_torques_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint torques on the articulation."""
@@ -453,7 +453,7 @@ def joint_torques_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> to
         return torch.zeros(env.num_envs, device=env.device)
     
     penalty = torch.mean(torch.square(asset.data.applied_torque[:, joint_ids]), dim=1)
-    return torch.where(phases["ready_phase"], penalty*3.0, penalty)
+    return torch.where(phases["ready_phase"], penalty*5.0, penalty)
 
 def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> torch.Tensor:
     """Penalize joint velocities on the articulation based on joint type.

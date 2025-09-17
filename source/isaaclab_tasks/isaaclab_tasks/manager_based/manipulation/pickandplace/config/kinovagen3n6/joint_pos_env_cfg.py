@@ -10,13 +10,13 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.assets import RigidObjectCfg
+from isaaclab.assets import RigidObjectCfg, AssetBaseCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 import isaaclab.sim as sim_utils
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg, GroundPlaneCfg
 from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 
 from . import mdp
@@ -58,6 +58,32 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
                 ),
             ],
         )
+        self.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
+            spawn=UsdFileCfg(
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+                scale=(0.8, 0.8, 0.8),
+                rigid_props=RigidBodyPropertiesCfg(
+                    solver_position_iteration_count=16,
+                    solver_velocity_iteration_count=1,
+                    max_angular_velocity=1000.0,
+                    max_linear_velocity=1000.0,
+                    max_depenetration_velocity=5.0,
+                    disable_gravity=False,
+                ),
+            ),
+        )
+        # self.scene.table = AssetBaseCfg(
+        #     prim_path="{ENV_REGEX_NS}/Table",
+        #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.39], rot=[1.0, 0, 0, 0]),
+        #     spawn=UsdFileCfg(usd_path="../Assets/pseudo_table/pseudo_table.usd"),
+        # )
+        # self.scene.plane = AssetBaseCfg(
+        #     prim_path="/World/GroundPlane",
+        #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.78]),
+        #     spawn=GroundPlaneCfg(),
+        # )
         self.scene.contact_forces_arm = ContactSensorCfg(
             prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)",
             update_period=0.0,

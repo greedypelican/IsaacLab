@@ -147,3 +147,32 @@ class KinovaGen3N6ReachEnvCfg(ReachEnvCfg):
         self.commands.ee_pose.ranges.pitch = (math.pi / 2, math.pi / 2)
         self.commands.ee_pose.ranges.pos_x = (0.25, 0.55)
         self.commands.ee_pose.resampling_time_range = (8.0, 8.0)
+
+
+@configclass
+class KinovaGen3N6ReachEnvCfg_PLAY(KinovaGen3N6ReachEnvCfg):
+    """Configuration for playing/demonstration of Kinova Gen3 N6 reach task."""
+
+    def __post_init__(self):
+        """Post initialization."""
+        super().__post_init__()
+
+        # Reduce number of environments for visualization
+        self.scene.num_envs = 1
+        self.scene.env_spacing = 2.5
+
+        # Increase episode length for demonstration
+        self.episode_length_s = 30.0
+
+        # Fixed target for testing
+        self.commands.ee_pose.ranges.pos_x = (0.4, 0.4)  # Fixed position
+        self.commands.ee_pose.ranges.pos_y = (0.0, 0.0)  # Centered
+        self.commands.ee_pose.ranges.pos_z = (0.3, 0.3)  # Fixed height
+        self.commands.ee_pose.resampling_time_range = (30.0, 30.0)  # No resampling
+
+        # Disable curriculum for play mode
+        self.curriculum = None
+
+        # Better camera view for observation
+        self.viewer.eye = (2.0, 2.0, 2.0)
+        self.viewer.lookat = (0.0, 0.0, 0.0)

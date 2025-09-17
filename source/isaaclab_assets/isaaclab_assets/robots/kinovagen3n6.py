@@ -6,7 +6,7 @@ from isaaclab.assets.articulation import ArticulationCfg
 KINOVAGEN3N6_CFG = ArticulationCfg(
     prim_path="/World/envs/env_.*/Robot", 
     spawn=sim_utils.UsdFileCfg(
-        usd_path="../Assets/Collected_kinovagen3n6/kinovagen3n6_v2.usd", 
+        usd_path="/home/user/robot_factory/kinova/Collected_kinovagen3n6/kinovagen3n6_v2.usd", 
         activate_contact_sensors=True, 
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False, 

@@ -29,7 +29,7 @@ import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
 from . import mdp as kinovagen3n6_mdp
 from isaaclab_assets.robots.kinovagen3n6 import KINOVAGEN3N6_REACH_CFG
 
-EPISODE_LENGTH_SEC = 15.0
+EPISODE_LENGTH_SEC = 16.0
 DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
@@ -46,33 +46,33 @@ MARKER_CFG = VisualizationMarkersCfg(
 
 @configclass
 class KinovaGen3N6ArmOnlySceneCfg(ReachSceneCfg):
-    ee_frame = FrameTransformerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/arm_base_link",
-        debug_vis=False,
-        visualizer_cfg=VisualizationMarkersCfg(
-            prim_path = "/Visuals/FrameTransformer",
-            markers={
-                "frame": sim_utils.UsdFileCfg(
-                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
-                    scale=(0.1, 0.1, 0.1),
-                ),
-                "connecting_line": sim_utils.CylinderCfg(
-                    radius=0.002,
-                    height=1.0,
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0), roughness=1.0),
-                ),
-            }
-        ),
-        target_frames=[
-            FrameTransformerCfg.FrameCfg(
-                prim_path="{ENV_REGEX_NS}/Robot/gripper_base_link",
-                name="end_effector",
-                offset=OffsetCfg(
-                    pos=[0.15, 0.0, 0.0],
-                ),
-            ),
-        ],
-    )
+    # ee_frame = FrameTransformerCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/arm_base_link",
+    #     debug_vis=False,
+    #     visualizer_cfg=VisualizationMarkersCfg(
+    #         prim_path = "/Visuals/FrameTransformer",
+    #         markers={
+    #             "frame": sim_utils.UsdFileCfg(
+    #                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+    #                 scale=(0.1, 0.1, 0.1),
+    #             ),
+    #             "connecting_line": sim_utils.CylinderCfg(
+    #                 radius=0.002,
+    #                 height=1.0,
+    #                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0), roughness=1.0),
+    #             ),
+    #         }
+    #     ),
+    #     target_frames=[
+    #         FrameTransformerCfg.FrameCfg(
+    #             prim_path="{ENV_REGEX_NS}/Robot/gripper_base_link",
+    #             name="end_effector",
+    #             offset=OffsetCfg(
+    #                 pos=[0.15, 0.0, 0.0],
+    #             ),
+    #         ),
+    #     ],
+    # )
     # object = RigidObjectCfg(
     #     prim_path="{ENV_REGEX_NS}/Object",
     #     init_state=RigidObjectCfg.InitialStateCfg(pos=[0.25, 0.0, 0.0], rot=[0.70711, 0, 0.70711, 0]),
@@ -123,12 +123,39 @@ class KinovaGen3N6ArmOnlyEventCfg(EventCfg):
         func=mdp.reset_scene_to_default,
         mode="reset",
     )
+    reset_gravity = EventTerm(
+        func=mdp.randomize_physics_scene_gravity,
+        mode="reset",
+        params={
+            "gravity_distribution_params": ([0.9, 0.9, 0.9], [1.1, 1.1, 1.1]),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+
     reset_robot_joints = EventTerm(
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
             "position_range": (-0.1, 0.1),
-            "velocity_range": (0.0, 0.0),
+            "velocity_range": (-0.1, 0.1),
+        },
+    )
+    robot_amount_of_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "mass_distribution_params": (0.75, 1.25),
+            "operation": "scale",
+        },
+    )
+    robot_center_of_mass = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "com_range": {"x": (-0.015, 0.015), "y": (-0.015, 0.015), "z": (-0.015, 0.015)},
         },
     )
 
@@ -140,18 +167,44 @@ class KinovaGen3N6ArmOnlyEventCfg(EventCfg):
 class KinovaGen3N6ArmOnlyRewardsCfg(RewardsCfg):
     """Reward configuration for 6DOF arm-only reach task."""
 
-    end_effector_orientation_tracking_fine_grained = RewTerm(
+    end_effector_position_tracking_negative = RewTerm(
+        func=mdp.position_command_error,
+        weight=-0.2,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "command_name": "ee_pose"},
+    )
+    end_effector_position_tracking_positive = RewTerm(
+        func=mdp.position_command_error_tanh,
+        weight=5.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "std": 0.2, "command_name": "ee_pose"},
+    )
+    end_effector_position_tracking_positive_fine = RewTerm(
+        func=mdp.position_command_error_tanh,
+        weight=1.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "std": 0.04, "command_name": "ee_pose"},
+    )
+    end_effector_orientation_tracking_negative = RewTerm(
+        func=mdp.orientation_command_error,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "command_name": "ee_pose"},
+    )
+    end_effector_orientation_tracking_positive = RewTerm(
         func=kinovagen3n6_mdp.orientation_command_error_tanh,
         weight=3.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_base_link"]), "std": 0.3, "command_name": "ee_pose"},
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "std": 0.3, "command_name": "ee_pose"},
     )
+    end_effector_orientation_tracking_positive_fine = RewTerm(
+        func=kinovagen3n6_mdp.orientation_command_error_tanh,
+        weight=0.6,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["gripper_tip"]), "std": 0.06, "command_name": "ee_pose"},
+    )
+
     action_penalty = RewTerm(
         func=kinovagen3n6_mdp.action_rate_penalty,
         weight=-0.05,
     )
     velocity_penalty = RewTerm(
         func=kinovagen3n6_mdp.joint_velocity_penalty,
-        weight=-0.02,
+        weight=-0.025,
     )
     acceleration_penalty = RewTerm(
         func=kinovagen3n6_mdp.joint_acceleration_penalty,
@@ -159,14 +212,9 @@ class KinovaGen3N6ArmOnlyRewardsCfg(RewardsCfg):
     )
 
     def __post_init__(self):
-        self.end_effector_position_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
-
-        self.end_effector_position_tracking_fine_grained.weight = 5.0
-        self.end_effector_position_tracking_fine_grained.params["std"] = 0.2
-        self.end_effector_position_tracking_fine_grained.params["asset_cfg"].body_names = ["gripper_base_link"]
-
-        self.end_effector_orientation_tracking.weight = -0.1
-        self.end_effector_orientation_tracking.params["asset_cfg"].body_names = ["gripper_base_link"]
+        self.end_effector_position_tracking = None
+        self.end_effector_position_tracking_fine_grained = None
+        self.end_effector_orientation_tracking = None
 
         self.action_rate = None
         self.joint_vel = None
@@ -194,18 +242,34 @@ class KinovaGen3N6ArmOnlyTerminationsCfg(TerminationsCfg):
 class KinovaGen3N6ArmOnlyCurriculumCfg(CurriculumCfg):
     """Curriculum terms for 6DOF arm-only reach task."""
 
-    # Disable curriculum completely - penalties are unstable
+    # end_effector_position_tracking_positive = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "end_effector_position_tracking_positive", "weight": 1.0, "num_steps": 40000}
+    # )
+    # end_effector_position_tracking_positive_fine = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "end_effector_position_tracking_positive_fine", "weight": 1.0, "num_steps": 40000}
+    # )
+    # end_effector_orientation_tracking_positive = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "end_effector_orientation_tracking_positive", "weight": 2.0, "num_steps": 40000}
+    # )
+    # end_effector_orientation_tracking_positive_fine = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "end_effector_orientation_tracking_positive_fine", "weight": 2.0, "num_steps": 40000}
+    # )
+
     action_penalty = CurrTerm(
         func=mdp.modify_reward_weight,
-        params={"term_name": "action_penalty", "weight": -0.25, "num_steps": 70000}
+        params={"term_name": "action_penalty", "weight": -0.5, "num_steps": 40000}
     )
     velocity_penalty = CurrTerm(
         func=mdp.modify_reward_weight,
-        params={"term_name": "velocity_penalty", "weight": -0.04, "num_steps": 70000}
+        params={"term_name": "velocity_penalty", "weight": -0.05, "num_steps": 40000}
     )
     acceleration_penalty = CurrTerm(
         func=mdp.modify_reward_weight,
-        params={"term_name": "acceleration_penalty", "weight": -0.00002, "num_steps": 150000}
+        params={"term_name": "acceleration_penalty", "weight": -0.0001, "num_steps": 80000}
     )
 
     def __post_init__(self):
@@ -235,14 +299,14 @@ class KinovaGen3N6ArmOnlyReachEnvCfg(ReachEnvCfg):
         self.viewer.eye = (3.5, 3.5, 3.5)
 
 
-        self.commands.ee_pose.body_name = "gripper_base_link"
-        self.commands.ee_pose.resampling_time_range = (5.0, 5.0)
+        self.commands.ee_pose.body_name = "gripper_tip"
+        self.commands.ee_pose.resampling_time_range = (4.0, 4.0)
         self.commands.ee_pose.ranges.pos_x = (0.15, 0.45)
         self.commands.ee_pose.ranges.pos_y = (-0.55, 0.55)
-        self.commands.ee_pose.ranges.pos_z = (0.2, 0.4)
-        self.commands.ee_pose.ranges.roll = (math.pi/2, math.pi/2)
-        self.commands.ee_pose.ranges.pitch = (math.pi/2, math.pi/2)
-        self.commands.ee_pose.ranges.yaw = (0.0, math.pi)
+        self.commands.ee_pose.ranges.pos_z = (0.0, 0.35)
+        self.commands.ee_pose.ranges.roll = (0.0, 0.0)
+        self.commands.ee_pose.ranges.pitch = (math.pi, math.pi)
+        self.commands.ee_pose.ranges.yaw = (-math.pi, 0.0)
         # self.commands.ee_pose.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
         # self.commands.ee_pose.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
 
@@ -268,47 +332,10 @@ class KinovaGen3N6ArmOnlyReachEnvCfg_PLAY(KinovaGen3N6ArmOnlyReachEnvCfg):
         self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
 
-        # Increase episode length for demonstration
-        self.episode_length_s = 30.0
-
-        # Fixed target for testing arm-only reaching
-        self.commands.ee_pose.ranges.pos_x = (0.4, 0.4)  # Fixed position
-        self.commands.ee_pose.ranges.pos_y = (0.0, 0.0)  # Centered
-        self.commands.ee_pose.ranges.pos_z = (0.3, 0.3)  # Fixed height
-        self.commands.ee_pose.resampling_time_range = (30.0, 30.0)  # No resampling
-
         # Disable curriculum for play mode
         self.curriculum = None
+        self.observations.policy.enable_corruption = False
 
         # Better camera view for observation
         self.viewer.eye = (2.0, 2.0, 2.0)
         self.viewer.lookat = (0.0, 0.0, 0.0)
-
-
-@configclass
-class KinovaGen3N6ArmOnlyReachEnvCfg_DEMO(KinovaGen3N6ArmOnlyReachEnvCfg):
-    """Demo configuration for showcasing 6DOF arm-only capabilities."""
-
-    def __post_init__(self):
-        """Post initialization."""
-        super().__post_init__()
-
-        # Single environment for focused demonstration
-        self.scene.num_envs = 1
-        self.scene.env_spacing = 3.0
-
-        # Extended episode length for comprehensive demonstration
-        self.episode_length_s = 45.0
-
-        # Diverse targets to show full 6DOF arm workspace
-        self.commands.ee_pose.ranges.pos_x = (0.2, 0.6)   # Extended reach
-        self.commands.ee_pose.ranges.pos_y = (-0.3, 0.3)  # Side-to-side movement
-        self.commands.ee_pose.ranges.pos_z = (0.1, 0.5)   # Vertical range
-        self.commands.ee_pose.resampling_time_range = (12.0, 18.0)  # Faster target changes
-
-        # Disable curriculum for demonstration
-        self.curriculum = None
-
-        # Optimal camera angle for 6DOF arm demonstration
-        self.viewer.eye = (1.5, 1.5, 1.5)
-        self.viewer.lookat = (0.4, 0.0, 0.3)  # Focus on workspace center

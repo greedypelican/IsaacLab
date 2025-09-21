@@ -21,11 +21,11 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
             "joint_1": 0.0,
-            "joint_2": -math.pi/12, # -15
-            "joint_3": -2*math.pi/3, # -120
+            "joint_2": -0.262, # -15
+            "joint_3": -2.094, # -120
             "joint_4": 0.0,
-            "joint_5": -math.pi/4, # -45
-            "joint_6": math.pi/2, # 90
+            "joint_5": -0.785, # -45
+            "joint_6": 1.571, # 90
             "left_inner_finger_joint": 0.0,
             "right_inner_finger_joint": 0.0,
             "left_outer_finger_joint": 0.0 ,
@@ -42,14 +42,14 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
         "kinova_shoulder": ImplicitActuatorCfg(
             joint_names_expr=["joint_1", "joint_2", "joint_3"],
             effort_limit_sim=39.0,
-            velocity_limit_sim=4*math.pi/9,
+            velocity_limit_sim=1.396,
             stiffness=40.0,
             damping=1.0,
         ),
         "kinova_forearm": ImplicitActuatorCfg(
             joint_names_expr=["joint_4", "joint_5", "joint_6"],
             effort_limit_sim=9.0,
-            velocity_limit_sim=7*math.pi/18,
+            velocity_limit_sim=1.222,
             stiffness=15.0,
             damping=0.5,
         ),
@@ -57,21 +57,21 @@ KINOVAGEN3N6_CFG = ArticulationCfg(
         "gripper_drive": ImplicitActuatorCfg( # finger control joint
             joint_names_expr=["left_outer_knuckle_joint"],  # "right_outer_knuckle_joint" is its mimic joint
             effort_limit_sim=330.0, #16.5 * 20
-            velocity_limit_sim=29*math.pi/9,
+            velocity_limit_sim=10.123,
             stiffness=3.4, #0.17 * 20
             damping=0.004, #0.0002 * 20
         ),
         "gripper_finger": ImplicitActuatorCfg( # enable the gripper to grasp in a parallel manner
             joint_names_expr=[".*_inner_finger_joint"],
             effort_limit_sim=15.0, # 0.5 * 20
-            velocity_limit_sim=29*math.pi/9,
+            velocity_limit_sim=10.123,
             stiffness=0.04, # 0.002 * 20
             damping=0.0002, # 0.00001 * 20
         ),
         "gripper_passive": ImplicitActuatorCfg(  # set PD to zero for passive joints in close-loop gripper
             joint_names_expr=[".*_inner_finger_knuckle_joint", ".*_outer_finger_joint", "right_outer_knuckle_joint"],
             effort_limit_sim=0.2, # 0.01 * 20
-            velocity_limit_sim=29*math.pi/9,
+            velocity_limit_sim=10.123,
             stiffness=0.0,
             damping=0.0,
         ),
@@ -97,11 +97,11 @@ KINOVAGEN3N6_REACH_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={
             "joint_1": 0.0,
-            "joint_2": math.pi/12, # 15
-            "joint_3": -2*math.pi/3, # -120
+            "joint_2": 0.262, # 15
+            "joint_3": -2.094, # -120
             "joint_4": 0.0,
-            "joint_5": -math.pi/4, # -45
-            "joint_6": math.pi/2, # 90
+            "joint_5": -0.785, # -45
+            "joint_6": 1.571, # 90
         },
         pos=(0.0, 0.0, 0.0),
         rot=(1.0, 0.0, 0.0, 0.0),
@@ -110,14 +110,14 @@ KINOVAGEN3N6_REACH_CFG = ArticulationCfg(
         "kinova_shoulder": ImplicitActuatorCfg(
             joint_names_expr=["joint_1", "joint_2", "joint_3"],
             effort_limit_sim=39.0,
-            velocity_limit_sim=4*math.pi/9,
+            velocity_limit_sim=1.396,
             stiffness=40.0,
             damping=1.0,
         ),
         "kinova_forearm": ImplicitActuatorCfg(
             joint_names_expr=["joint_4", "joint_5", "joint_6"],
             effort_limit_sim=9.0,
-            velocity_limit_sim=7*math.pi/18,
+            velocity_limit_sim=1.222,
             stiffness=15.0,
             damping=0.5,
         ),

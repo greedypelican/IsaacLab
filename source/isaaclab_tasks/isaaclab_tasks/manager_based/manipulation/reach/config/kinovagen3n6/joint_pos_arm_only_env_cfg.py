@@ -8,8 +8,6 @@
 import math
 import isaaclab.sim as sim_utils
 from isaaclab.utils import configclass
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg, RigidObjectCfg
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -34,61 +32,11 @@ DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
 
-MARKER_CFG = VisualizationMarkersCfg(
-    markers={
-        "cuboid": sim_utils.CuboidCfg(
-            size=(0.02, 0.02, 0.02),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 0.0)),
-        ),
-    }
-)
 
 
 @configclass
 class KinovaGen3N6ArmOnlySceneCfg(ReachSceneCfg):
-    # ee_frame = FrameTransformerCfg(
-    #     prim_path="{ENV_REGEX_NS}/Robot/arm_base_link",
-    #     debug_vis=False,
-    #     visualizer_cfg=VisualizationMarkersCfg(
-    #         prim_path = "/Visuals/FrameTransformer",
-    #         markers={
-    #             "frame": sim_utils.UsdFileCfg(
-    #                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
-    #                 scale=(0.1, 0.1, 0.1),
-    #             ),
-    #             "connecting_line": sim_utils.CylinderCfg(
-    #                 radius=0.002,
-    #                 height=1.0,
-    #                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0), roughness=1.0),
-    #             ),
-    #         }
-    #     ),
-    #     target_frames=[
-    #         FrameTransformerCfg.FrameCfg(
-    #             prim_path="{ENV_REGEX_NS}/Robot/gripper_base_link",
-    #             name="end_effector",
-    #             offset=OffsetCfg(
-    #                 pos=[0.15, 0.0, 0.0],
-    #             ),
-    #         ),
-    #     ],
-    # )
-    # object = RigidObjectCfg(
-    #     prim_path="{ENV_REGEX_NS}/Object",
-    #     init_state=RigidObjectCfg.InitialStateCfg(pos=[0.25, 0.0, 0.0], rot=[0.70711, 0, 0.70711, 0]),
-    #     spawn=UsdFileCfg(
-    #         usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-    #         scale=(0.8, 0.8, 0.8),
-    #         rigid_props=RigidBodyPropertiesCfg(
-    #             solver_position_iteration_count=16,
-    #             solver_velocity_iteration_count=1,
-    #             max_angular_velocity=1000.0,
-    #             max_linear_velocity=1000.0,
-    #             max_depenetration_velocity=5.0,
-    #             disable_gravity=False,
-    #         ),
-    #     ),
-    # )
+
     contact_forces_arm = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)",
         update_period=DELTA_TIME,
@@ -242,23 +190,6 @@ class KinovaGen3N6ArmOnlyTerminationsCfg(TerminationsCfg):
 class KinovaGen3N6ArmOnlyCurriculumCfg(CurriculumCfg):
     """Curriculum terms for 6DOF arm-only reach task."""
 
-    # end_effector_position_tracking_positive = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "end_effector_position_tracking_positive", "weight": 1.0, "num_steps": 40000}
-    # )
-    # end_effector_position_tracking_positive_fine = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "end_effector_position_tracking_positive_fine", "weight": 1.0, "num_steps": 40000}
-    # )
-    # end_effector_orientation_tracking_positive = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "end_effector_orientation_tracking_positive", "weight": 2.0, "num_steps": 40000}
-    # )
-    # end_effector_orientation_tracking_positive_fine = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "end_effector_orientation_tracking_positive_fine", "weight": 2.0, "num_steps": 40000}
-    # )
-
     action_penalty = CurrTerm(
         func=mdp.modify_reward_weight,
         params={"term_name": "action_penalty", "weight": -0.5, "num_steps": 40000}
@@ -301,21 +232,19 @@ class KinovaGen3N6ArmOnlyReachEnvCfg(ReachEnvCfg):
 
         self.commands.ee_pose.body_name = "gripper_tip"
         self.commands.ee_pose.resampling_time_range = (4.0, 4.0)
-        self.commands.ee_pose.ranges.pos_x = (0.15, 0.45)
-        self.commands.ee_pose.ranges.pos_y = (-0.55, 0.55)
-        self.commands.ee_pose.ranges.pos_z = (0.0, 0.35)
+        self.commands.ee_pose.ranges.pos_x = (0.15, 0.41)
+        self.commands.ee_pose.ranges.pos_y = (-0.51, 0.51)
+        self.commands.ee_pose.ranges.pos_z = (-0.01, 0.31)
         self.commands.ee_pose.ranges.roll = (0.0, 0.0)
         self.commands.ee_pose.ranges.pitch = (math.pi, math.pi)
         self.commands.ee_pose.ranges.yaw = (-math.pi, 0.0)
-        # self.commands.ee_pose.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-        # self.commands.ee_pose.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
 
 
         self.actions.arm_action = mdp.JointPositionActionCfg(
             asset_name="robot",
             joint_names=["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"],
             scale=0.5,
-            use_default_offset=False
+            use_default_offset=True
         )
         self.actions.gripper_action = None
 

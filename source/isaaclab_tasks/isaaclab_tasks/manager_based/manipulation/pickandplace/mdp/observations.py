@@ -85,9 +85,11 @@ def current_phase(
         Tensor with shape (num_envs, 1) containing phase information:
         0.0: pick phase (아직 phase1_complete가 False)
         1.0: ascend phase (phase1_complete가 True, phase2_complete가 False)
-        2.0: descend phase (phase2_complete가 True, phase3_complete가 False)
-        3.0: place phase (phase3_complete가 True, phase4_complete가 False)
-        4.0: ready phase (phase4_complete가 True)
+        2.0: move phase1 (phase2_complete가 True, phase3_complete가 False)
+        3.0: move phase2 (phase3_complete가 True, phase4_complete가 False)
+        4.0: descend phase (phase4_complete가 True, phase5_complete가 False)
+        5.0: place phase (phase5_complete가 True, phase6_complete가 False)
+        6.0: ready phase (phase6_complete가 True)
     """
     # Phase flags가 초기화되지 않았으면 기본값 반환
     if not phase_flags or "phase1_complete" not in phase_flags:
@@ -99,5 +101,7 @@ def current_phase(
     phase[phase_flags["phase2_complete"]] = 2.0
     phase[phase_flags["phase3_complete"]] = 3.0
     phase[phase_flags["phase4_complete"]] = 4.0
+    phase[phase_flags["phase5_complete"]] = 5.0
+    phase[phase_flags["phase6_complete"]] = 6.0
     
     return phase

@@ -17,7 +17,7 @@ from isaaclab.utils.math import matrix_from_quat
 from isaaclab.utils.math import quat_inv
 from isaaclab.envs import ManagerBasedRLEnv
 
-from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD
+from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD, ASCEND_Z_OFFSET
 
 
 def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
@@ -29,9 +29,11 @@ def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
     return {
         "pick_phase": ~phase_flags["phase1_complete"],
         "ascend_phase": phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"],
-        "descend_phase": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
-        "place_phase": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
-        "ready_phase": phase_flags["phase4_complete"],
+        "move_phase1": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
+        "move_phase2": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
+        "descend_phase": phase_flags["phase4_complete"] & ~phase_flags["phase5_complete"],
+        "place_phase": phase_flags["phase5_complete"] & ~phase_flags["phase6_complete"],
+        "ready_phase": phase_flags["phase6_complete"],
     }
 
 def _is_grasping(env: ManagerBasedRLEnv, contact_threshold: float = GRASP_THRESHOLD) -> torch.Tensor:
@@ -49,19 +51,23 @@ def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Basic reward for phase completion to encourage progression through pick and place phases.
     
     Provides base rewards for each phase completion:
-    - Pick phase complete: 4.0 reward
-    - Ascend phase complete: 9.0 reward
-    - Descend phase complete: 16.0 reward
+    - Ascend phase complete: 4.0 reward
+    - Move phase1 complete: 9.0 reward
+    - Move phase2 complete: 13.0 reward
+    - Descend phase complete: 18.0 reward
     - Place phase complete: 25.0 reward
+    - Ready phase complete: 30.0 reward
     """
     phases = _phase_states(env)
     
     # Calculate cumulative phase rewards with different weights
     phase_rewards = torch.zeros(env.num_envs, device=env.device)
     phase_rewards += torch.where(phases["ascend_phase"], 4.0, 0.0)
-    phase_rewards += torch.where(phases["descend_phase"], 9.0, 0.0)
-    phase_rewards += torch.where(phases["place_phase"], 16.0, 0.0)
-    phase_rewards += torch.where(phases["ready_phase"], 25.0, 0.0)
+    phase_rewards += torch.where(phases["move_phase1"], 9.0, 0.0)
+    phase_rewards += torch.where(phases["move_phase2"], 13.0, 0.0)
+    phase_rewards += torch.where(phases["descend_phase"], 18.0, 0.0)
+    phase_rewards += torch.where(phases["place_phase"], 25.0, 0.0)
+    phase_rewards += torch.where(phases["ready_phase"], 30.0, 0.0)
 
     return phase_rewards
 
@@ -84,17 +90,7 @@ def ee_distance(
     ee_pos_b, _  = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
 
     dist_b = torch.norm(obj_pos_b - ee_pos_b, dim=1)
-
-    initial_obj_pos_b = getattr(env, "_object_initial_pos_b", None)
-    initial_ee_pos_b = getattr(env, "_ee_initial_pos_b", None)
-    if initial_obj_pos_b is not None and initial_ee_pos_b is not None:
-        initial_dist = torch.norm(initial_obj_pos_b - initial_ee_pos_b, dim=1)
-        norm_factor = torch.clamp(initial_dist, min=1e-6)
-        normalized_dist = dist_b / norm_factor
-    else:
-        normalized_dist = dist_b
-
-    reach_reward = 1 - torch.tanh(normalized_dist / std)
+    reach_reward = 1 - torch.tanh(dist_b / std)
     reward = torch.where(phases["pick_phase"], reach_reward*1.5, 0.0)
     return reward
 
@@ -137,18 +133,19 @@ def object_contact(
     left_contact_reward = torch.square(left_force_norm) * 0.5
     right_contact_reward = torch.square(right_force_norm) * 0.5
     
+    move_mask = phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"] | phases["descend_phase"]
     left_reward = torch.where(phases["pick_phase"], left_contact_reward*2.5,
-                      torch.where(phases["ascend_phase"] | phases["descend_phase"], left_contact_reward*0.5,
+                      torch.where(move_mask, left_contact_reward*0.5,
                           torch.where(phases["place_phase"], left_contact_reward*-1.5, 0.0)))
     right_reward = torch.where(phases["pick_phase"], right_contact_reward*2.5,
-                      torch.where(phases["ascend_phase"] | phases["descend_phase"], right_contact_reward*0.5,
+                      torch.where(move_mask, right_contact_reward*0.5,
                           torch.where(phases["place_phase"], right_contact_reward*-1.5, 0.0)))
     reward = left_reward + right_reward
     return reward
 
 def object_height(
     env: ManagerBasedRLEnv,
-    ascend_threshold: float = 0.03,
+    ascend_threshold: float = 0.01,
     descend_threshold: float = 0.05,
     place_threshold: float = 0.02,
 ) -> torch.Tensor:
@@ -161,10 +158,10 @@ def object_height(
     height_b = ee_pos_b[:, 2]
 
     grasping = _is_grasping(env)
-    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.4), 1.0, 0.0)
+    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.25), 1.0, 0.0)
     descend_reward = torch.where(height_b <= descend_threshold, 1.0, 0.0)
     place_reward = torch.where(height_b >= place_threshold, 1.0, 0.0)
-    reward = torch.where(grasping & phases["ascend_phase"], ascend_reward,
+    reward = torch.where(grasping & (phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"]), ascend_reward,
                  torch.where(grasping & phases["descend_phase"], descend_reward,
                      torch.where(phases["place_phase"] | phases["ready_phase"], place_reward, 0.0)))
     return reward
@@ -174,22 +171,15 @@ def object_track(
     std: float = 0.3,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Reward the agent for tracking the goal pose using tanh-kernel.
-    
-    phase_flags에 따라 mode를 동적으로 결정:
-    - Pick/Ascend/ phase: ascend mode
-    - Descend/Place phase: descend mode
-    """
+    """Reward the agent for tracking the phase-specific waypoints using a tanh kernel."""
     phases = _phase_states(env)
-    
+
     robot: RigidObject = env.scene[robot_cfg.name]
     ee_frame: FrameTransformer = env.scene["ee_frame"]
-    
-    ascend_command = env.command_manager.get_command("ascend")
-    descend_command = env.command_manager.get_command("descend")
-    command = torch.where(phases["ascend_phase"].unsqueeze(-1).expand(-1, descend_command.shape[-1]), ascend_command, descend_command)
-    
-    target_pos_b = command[:, :3]
+
+    move_command = env.command_manager.get_command("move")
+    target_command = env.command_manager.get_command("target")
+
     ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
 
     # Grasping detection from finger pad contact sensors
@@ -197,7 +187,7 @@ def object_track(
 
     robot_pos_w = robot.data.root_pos_w
     robot_quat_w = robot.data.root_quat_w
-    
+
     object_pos_relative = ee_pos_w - robot_pos_w  # Translate to robot origin
     robot_quat_inv = quat_inv(robot_quat_w)
     object_pos_b, _ = combine_frame_transforms(
@@ -205,26 +195,32 @@ def object_track(
         robot_quat_inv,  # Use inverse quaternion
         object_pos_relative
     )
+
+    if hasattr(env, "_object_initial_pos_b"):
+        ascend_target = env._object_initial_pos_b.clone()
+    else:
+        ascend_target = object_pos_b.clone()
+    ascend_target[:, 2] = 0.15
+
+    move_target = move_command[:, :3].clone()
     
+    target_baseline = target_command[:, :3]
+    pre_target = target_baseline.clone()
+    pre_target[:, 2] = 0.15
+
+    target_pos_b = torch.where(phases["ascend_phase"].unsqueeze(-1), ascend_target,
+                       torch.where(phases["move_phase1"].unsqueeze(-1), move_target,
+                           torch.where(phases["move_phase2"].unsqueeze(-1), pre_target, target_baseline.clone())))
+
     distance = torch.norm(object_pos_b - target_pos_b, dim=1)
     height_diff = torch.abs(object_pos_b[:, 2] - target_pos_b[:, 2])
-    metric = distance + height_diff
+    command_reward = 1 - torch.tanh((distance + height_diff) / std)
 
-    normalized_metric = metric
-
-    initial_obj_pos_b = getattr(env, "_object_initial_pos_b", None)
-    if initial_obj_pos_b is not None:
-        ascend_norm = torch.clamp(torch.norm(initial_obj_pos_b - ascend_command[:, :3], dim=1), min=1e-6)
-        normalized_metric = torch.where(phases["ascend_phase"], metric / ascend_norm, normalized_metric)
-
-    descend_norm = torch.clamp(torch.norm(ascend_command[:, :3] - descend_command[:, :3], dim=1), min=1e-6)
-    descend_mask = phases["descend_phase"] | phases["place_phase"]
-    normalized_metric = torch.where(descend_mask, metric / descend_norm, normalized_metric)
-
-    command_reward = 1 - torch.tanh(normalized_metric / std)
-
-    reward = torch.where(grasping & (phases["ascend_phase"] | phases["descend_phase"]), command_reward*2.5, 
-                 torch.where(grasping & phases["place_phase"], command_reward*0.5, 0.0))
+    reward = torch.where(
+        grasping & (phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"] | phases["descend_phase"]),
+        command_reward * 2.5,
+        torch.where(grasping & phases["place_phase"], command_reward * 0.5, 0.0)
+    )
     return reward
 
 

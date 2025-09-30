@@ -106,12 +106,12 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
         )
 
 
-        self.commands.ascend.body_name = "gripper_base_link"
-        self.commands.ascend.ranges = mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.25, 0.3), pos_y=(-0.1, 0.1), pos_z=(0.1, 0.2), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+        self.commands.move.body_name = "gripper_base_link"
+        self.commands.move.ranges = mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.25, 0.3), pos_y=(-0.025, 0.025), pos_z=(0.15, 0.20), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
         )
-        self.commands.descend.body_name = "gripper_base_link"
-        self.commands.descend.ranges = mdp.UniformPoseCommandCfg.Ranges(
+        self.commands.target.body_name = "gripper_base_link"
+        self.commands.target.ranges = mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.05, 0.35), pos_y=(0.2, 0.5), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
         )
 

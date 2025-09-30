@@ -76,16 +76,16 @@ class SceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command terms for the MDP."""
 
-    ascend = mdp.UniformPoseCommandCfg(
+    move = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name=MISSING,
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.3, 0.3), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.15, 0.20), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
         ),
     )
-    descend = mdp.UniformPoseCommandCfg(
+    target = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name=MISSING,
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
@@ -96,10 +96,10 @@ class CommandsCfg:
     )
 
     def __post_init__(self):
-        self.ascend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-        self.ascend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
-        self.descend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
-        self.descend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
+        self.move.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/move_pose")
+        self.move.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
+        self.target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/target_pose")
+        self.target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
 
 
 @configclass
@@ -122,8 +122,8 @@ class ObservationsCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
         initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
-        ascend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
-        descend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
+        move_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "move"})
+        target_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "target"})
         current_phase = ObsTerm(func=mdp.current_phase)
         actions = ObsTerm(func=mdp.last_action)
 
@@ -283,6 +283,14 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
+    ee_motion_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "ee_motion_penalty",
+            "num_steps": 100000,
+            "weight": -0.03,
+        }
+    )
     arm_action_penalty = CurrTerm(
         func=mdp.modify_reward_weight_multi_stage,
         params={
@@ -337,14 +345,6 @@ class CurriculumCfg:
             "term_name": "gripper_acceleration_penalty",
             "num_steps": 200000,
             "weight": -0.000008,
-        }
-    )
-    ee_motion_penalty = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "ee_motion_penalty",
-            "num_steps": 300000,
-            "weight": -0.05,
         }
     )
 

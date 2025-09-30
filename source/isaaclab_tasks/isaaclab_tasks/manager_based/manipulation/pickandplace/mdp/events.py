@@ -10,6 +10,9 @@ from isaaclab.envs import ManagerBasedRLEnv
 phase_flags = {}
 GRASP_THRESHOLD = 1.0
 RELEASE_THRESHOLD = 0.05
+ASCEND_Z_OFFSET = 0.15
+ASCEND_Z_TOL = 0.03
+PLANAR_TOL = 0.03
 
 def reset_phase_flags(
     env: ManagerBasedRLEnv,
@@ -31,12 +34,21 @@ def reset_phase_flags(
         phase_flags["phase2_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase3_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase4_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
+        phase_flags["phase5_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
+        phase_flags["phase6_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
+    else:
+        current_size = phase_flags["phase1_complete"].shape[0]
+        for key in ("phase1_complete", "phase2_complete", "phase3_complete", "phase4_complete", "phase5_complete", "phase6_complete"):
+            if key not in phase_flags:
+                phase_flags[key] = torch.zeros(current_size, dtype=torch.bool, device=env.device)
     
     # 특정 환경들만 리셋
     phase_flags["phase1_complete"][env_ids] = False
     phase_flags["phase2_complete"][env_ids] = False
     phase_flags["phase3_complete"][env_ids] = False
     phase_flags["phase4_complete"][env_ids] = False
+    phase_flags["phase5_complete"][env_ids] = False
+    phase_flags["phase6_complete"][env_ids] = False
 
 
 def check_and_update_phase_flags(
@@ -53,8 +65,8 @@ def check_and_update_phase_flags(
     right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
     ee_frame: FrameTransformer = env.scene["ee_frame"]
     object: RigidObject = env.scene[object_cfg.name]
-    ascend_command = env.command_manager.get_command("ascend")
-    descend_command = env.command_manager.get_command("descend")
+    move_command = env.command_manager.get_command("move")
+    target_command = env.command_manager.get_command("target")
 
     # contact sensor of fingers (env_ids에 해당하는 환경들만)
     left_forces = left_finger_sensor.data.force_matrix_w[env_ids]
@@ -85,38 +97,71 @@ def check_and_update_phase_flags(
     phase1_condition = (distance_ee_object < 0.03) & grasping
     phase_flags["phase1_complete"][env_ids] = phase_flags["phase1_complete"][env_ids] | phase1_condition
 
-    # Phase 3: object가 ascend command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    des_pos_b_ascend = ascend_command[env_ids, :3]                    # already in robot frame
-    distance_ascend = torch.norm(des_pos_b_ascend - obj_pos_b, dim=1)
-    phase2_condition = (distance_ascend < 0.03) & grasping
-    phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (phase2_condition & phase_flags["phase1_complete"][env_ids])
+    # Phase 2 target: initial object position lifted by offset (robot frame)
+    if hasattr(env, "_object_initial_pos_b"):
+        ascend_target = env._object_initial_pos_b[env_ids].clone()
+    else:
+        ascend_target = obj_pos_b.clone()
+    ascend_target[:, 2] = ASCEND_Z_OFFSET
 
-    # Phase 4: object가 descend command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    des_pos_b_descend = descend_command[env_ids, :3]                  # already in robot frame
-    distance_descend = torch.norm(des_pos_b_descend - obj_pos_b, dim=1)
-    phase3_condition = (distance_descend < 0.03) & grasping
-    prev_phase3 = phase_flags["phase3_complete"][env_ids].clone()
-    update_mask = (phase3_condition & phase_flags["phase2_complete"][env_ids]) & ~prev_phase3
-    phase_flags["phase3_complete"][env_ids] = prev_phase3 | (phase3_condition & phase_flags["phase2_complete"][env_ids])
+    obj_z = obj_pos_b[:, 2]
+    ascend_z = ascend_target[:, 2]
+    ascend_z_reached = torch.abs(obj_z - ascend_z) < ASCEND_Z_TOL
 
-    # Cache object position in ROBOT ROOT FRAME at the first time phase3 is achieved
-    if not hasattr(env, "_object_pos_b_at_phase3"):
-        env._object_pos_b_at_phase3 = torch.zeros(env.num_envs, 3, device=env.device)
+    phase2_condition = ascend_z_reached & grasping
+    phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (
+        phase2_condition & phase_flags["phase1_complete"][env_ids]
+    )
+
+    # Phase 3: object가 move command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    move_pos_b = move_command[env_ids, :3]
+    move_xy_err = torch.norm(move_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
+    phase3_condition = ascend_z_reached & (move_xy_err < PLANAR_TOL) & grasping
+    phase_flags["phase3_complete"][env_ids] = phase_flags["phase3_complete"][env_ids] | (
+        phase3_condition & phase_flags["phase2_complete"][env_ids]
+    )
+
+    # Phase 4: object가 target command 상부와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    target_pos_b = target_command[env_ids, :3]
+    target_pre_descend = target_pos_b.clone()
+    target_pre_descend[:, 2] = ASCEND_Z_OFFSET
+    pre_target_xy_err = torch.norm(target_pre_descend[:, :2] - obj_pos_b[:, :2], dim=1)
+    pre_target_z = target_pre_descend[:, 2]
+    pre_target_z_reached = torch.abs(obj_z - pre_target_z) < ASCEND_Z_TOL
+    phase4_condition = pre_target_z_reached & (pre_target_xy_err < PLANAR_TOL) & grasping
+    phase_flags["phase4_complete"][env_ids] = phase_flags["phase4_complete"][env_ids] | (
+        phase4_condition & phase_flags["phase3_complete"][env_ids]
+    )
+
+    # Phase 5: object가 target command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
+    target_xy_err = torch.norm(target_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
+    target_z_err = torch.abs(obj_z - target_pos_b[:, 2])
+    phase5_condition = (target_xy_err < PLANAR_TOL) & (target_z_err < ASCEND_Z_TOL) & grasping
+    prev_phase5 = phase_flags["phase5_complete"][env_ids].clone()
+    update_mask = (phase5_condition & phase_flags["phase4_complete"][env_ids]) & ~prev_phase5
+    phase_flags["phase5_complete"][env_ids] = prev_phase5 | (
+        phase5_condition & phase_flags["phase4_complete"][env_ids]
+    )
+
+    # Cache object position in ROBOT ROOT FRAME at the first time phase5 is achieved
+    if not hasattr(env, "_object_pos_b_at_phase5"):
+        env._object_pos_b_at_phase5 = torch.zeros(env.num_envs, 3, device=env.device)
     if torch.any(update_mask):
         new_env_ids = env_ids[update_mask]
-        # compute object position in robot frame for those envs
-        obj_pos_b, _ = subtract_frame_transforms(
+        obj_pos_b_cache, _ = subtract_frame_transforms(
             robot.data.root_pos_w[new_env_ids], robot.data.root_quat_w[new_env_ids], object_pos[update_mask]
         )
-        env._object_pos_b_at_phase3[new_env_ids] = obj_pos_b
+        env._object_pos_b_at_phase5[new_env_ids] = obj_pos_b_cache
 
-    # Phase 5: initial joint state 와 가깝고 releasing 상태
+    # Phase 6: initial joint state 와 가깝고 releasing 상태
     joint_ids, _ = robot.find_joints(["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "left_outer_knuckle_joint"])
     # Calculate deviation using L2 norm
     joint_deviation = torch.linalg.norm(robot.data.joint_pos[:, joint_ids] - robot.data.default_joint_pos[:, joint_ids], dim=1)
-    phase4_condition = (joint_deviation < 0.1) & releasing
-    # phase3가 완료된 환경들에서만 phase4 완료 업데이트
-    phase_flags["phase4_complete"][env_ids] = phase_flags["phase4_complete"][env_ids] | (phase4_condition & phase_flags["phase3_complete"][env_ids])
+    phase6_condition = (joint_deviation < 0.1) & releasing
+    # phase5가 완료된 환경들에서만 phase6 완료 업데이트
+    phase_flags["phase6_complete"][env_ids] = phase_flags["phase6_complete"][env_ids] | (
+        phase6_condition & phase_flags["phase5_complete"][env_ids]
+    )
 
 
 def cache_object_initial_pose(

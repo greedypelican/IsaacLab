@@ -50,7 +50,9 @@ def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
         env.extras["log"]["Phases/phase_2_count"] = torch.sum(phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"]).item()
         env.extras["log"]["Phases/phase_3_count"] = torch.sum(phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]).item()
         env.extras["log"]["Phases/phase_4_count"] = torch.sum(phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"]).item()
-        env.extras["log"]["Phases/phase_5_count"] = torch.sum(phase_flags["phase4_complete"]).item()
+        env.extras["log"]["Phases/phase_5_count"] = torch.sum(phase_flags["phase4_complete"] & ~phase_flags["phase5_complete"]).item()
+        env.extras["log"]["Phases/phase_6_count"] = torch.sum(phase_flags["phase5_complete"] & ~phase_flags["phase6_complete"]).item()
+        env.extras["log"]["Phases/phase_7_count"] = torch.sum(phase_flags["phase6_complete"]).item()
         
         # Debug print
         # print(f"Phase metrics logged: phase0={env.extras['log']['Metrics/phase_0_count']}, phase1={env.extras['log']['Metrics/phase_1_count']}, phase2={env.extras['log']['Metrics/phase_2_count']}")
@@ -176,18 +178,19 @@ def object_move_after_place(
     move_threshold: float = 0.05,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+
 ) -> torch.Tensor:
-    """Terminate if, after Phase 3 success, the object moves in XY more than a threshold in the ROBOT ROOT frame.
+    """Terminate if, after Phase 5 success, the object moves in XY more than a threshold in the ROBOT ROOT frame.
 
     Compares current object position in robot root frame vs. the cached position (also in robot root frame)
-    captured when Phase 3 first completed.
+    captured when Phase 5 first completed.
     """
     # Validate phase flags
-    if not phase_flags or "phase3_complete" not in phase_flags:
+    if not phase_flags or "phase5_complete" not in phase_flags:
         return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
 
     # If the cache does not exist yet, no termination (nothing to compare against)
-    if not hasattr(env, "_object_pos_b_at_phase3"):
+    if not hasattr(env, "_object_pos_b_at_phase5"):
         return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
 
     # Assets
@@ -196,12 +199,12 @@ def object_move_after_place(
 
     # Current object position in robot root frame
     obj_pos_b, _ = subtract_frame_transforms(robot.data.root_pos_w, robot.data.root_quat_w, obj.data.root_pos_w[:, :3])
-    cached_xy = env._object_pos_b_at_phase3[:, :2]
+    cached_xy = env._object_pos_b_at_phase5[:, :2]
     current_xy = obj_pos_b[:, :2]
 
     # Displacement in XY in robot frame
     disp_xy = torch.linalg.norm(current_xy - cached_xy, dim=1)
 
     # Trigger only after Phase 3 is latched
-    terminate = phase_flags["phase3_complete"] & (disp_xy > move_threshold)
+    terminate = phase_flags["phase5_complete"] & (disp_xy > move_threshold)
     return terminate

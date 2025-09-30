@@ -60,7 +60,7 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
         )
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
+            init_state=RigidObjectCfg.InitialStateCfg(pos=[0.25, -0.35, 0.0], rot=[0.70711, 0, 0.70711, 0]),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
                 scale=(0.8, 0.8, 0.8),
@@ -74,41 +74,46 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
                 ),
             ),
         )
-        # self.scene.table = AssetBaseCfg(
-        #     prim_path="{ENV_REGEX_NS}/Table",
-        #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.39], rot=[1.0, 0, 0, 0]),
-        #     spawn=UsdFileCfg(usd_path="../Assets/pseudo_table/pseudo_table.usd"),
-        # )
-        # self.scene.plane = AssetBaseCfg(
-        #     prim_path="/World/GroundPlane",
-        #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.78]),
-        #     spawn=GroundPlaneCfg(),
-        # )
+        self.scene.table = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/Table",
+            init_state=AssetBaseCfg.InitialStateCfg(pos=[0.2, 0, -0.415], rot=[1.0, 0, 0, 0]),
+            spawn=UsdFileCfg(usd_path="../Assets/pseudo_table/pseudo_table.usd"),
+        )
+        self.scene.plane = AssetBaseCfg(
+            prim_path="/World/GroundPlane",
+            init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.805]),
+            spawn=GroundPlaneCfg(),
+        )
         self.scene.contact_forces_arm = ContactSensorCfg(
             prim_path="{ENV_REGEX_NS}/Robot/(arm_base_link|shoulder_link|bicep_link|forearm_link|spherical_wrist_1_link|spherical_wrist_2_link|bracelet_with_vision_link)",
-            update_period=0.0,
-            history_length=1,
+            update_period=self.sim.dt,
+            history_length=self.decimation,
             debug_vis=False,
         )
         self.scene.contact_forces_left_finger_pad = ContactSensorCfg(
             prim_path="{ENV_REGEX_NS}/Robot/left_finger_pad",
-            update_period=0.0,
-            history_length=1,
+            update_period=self.sim.dt,
+            history_length=self.decimation,
             debug_vis=True,
             filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
         )
         self.scene.contact_forces_right_finger_pad = ContactSensorCfg(
             prim_path="{ENV_REGEX_NS}/Robot/right_finger_pad",
-            update_period=0.0,
-            history_length=1,
+            update_period=self.sim.dt,
+            history_length=self.decimation,
             debug_vis=True,
             filter_prim_paths_expr=["{ENV_REGEX_NS}/Object"]
         )
 
 
         self.commands.ascend.body_name = "gripper_base_link"
+        self.commands.ascend.ranges = mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.25, 0.3), pos_y=(-0.1, 0.1), pos_z=(0.1, 0.2), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+        )
         self.commands.descend.body_name = "gripper_base_link"
-
+        self.commands.descend.ranges = mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.05, 0.35), pos_y=(0.2, 0.5), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+        )
 
         self.actions.arm_action = mdp.JointPositionActionCfg(
             asset_name="robot",
@@ -140,11 +145,15 @@ class KinovaGen3N6PickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
         # self.events.robot_center_of_mass.params["asset_cfg"] = SceneEntityCfg("robot", body_names=["arm_base_link", "shoulder_link", "bicep_link",
         #                                                                                            "forearm_link", "spherical_wrist_1_link", "spherical_wrist_2_link",
         #                                                                                            "bracelet_with_vision_link", "gripper_base_link"])
-
+        self.events.reset_object_position.params["pose_range"] = {"x": (-0.15, 0.15), "y": (-0.1, 0.1), "z": (0.0, 0.0), "roll": (-math.pi, math.pi)}
 
         self.rewards.goback.params["joint_names"] = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "left_outer_knuckle_joint"]
         self.rewards.ready.params["joint_names"] = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "left_outer_knuckle_joint"]
         self.rewards.ee_alignment_penalty.params["body_name"] = "gripper_base_link"
+
+        self.terminations.object_dropping.params["height_threshold"] = 0.03
+        self.terminations.object_out_of_bounds.params["x_bounds"] = (-0.1, 0.5)
+        self.terminations.object_out_of_bounds.params["y_bounds"] = (-0.6, 0.6)
 
 
 @configclass
@@ -153,6 +162,8 @@ class KinovaGen3N6PickAndPlaceEnvCfg_PLAY(KinovaGen3N6PickAndPlaceEnvCfg):
         # post init of parent
         super().__post_init__()
         # make a smaller scene for play
+        self.episode_length_s = 5.0
+
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.0
         # disable randomization for play

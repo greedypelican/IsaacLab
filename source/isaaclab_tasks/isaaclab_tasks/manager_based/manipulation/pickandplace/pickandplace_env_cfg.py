@@ -29,7 +29,7 @@ from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 from . import mdp
 
 
-EPISODE_LENGTH_SEC = 12.0
+EPISODE_LENGTH_SEC = 15.0
 DECIMATION = 3
 FREQUENCY = 50
 DELTA_TIME = 1 / (DECIMATION * FREQUENCY)
@@ -57,35 +57,9 @@ class SceneCfg(InteractiveSceneCfg):
 
     robot: ArticulationCfg = MISSING
     ee_frame: FrameTransformerCfg = MISSING
-    # object: RigidObjectCfg | DeformableObjectCfg = RigidObjectCfg(
-    #     prim_path="{ENV_REGEX_NS}/Object",
-    #     init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0, 0.013], rot=[0.70711, 0, 0.70711, 0]),
-    #     spawn=UsdFileCfg(
-    #         usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-    #         scale=(0.8, 0.8, 0.8),
-    #         rigid_props=RigidBodyPropertiesCfg(
-    #             solver_position_iteration_count=16,
-    #             solver_velocity_iteration_count=1,
-    #             max_angular_velocity=1000.0,
-    #             max_linear_velocity=1000.0,
-    #             max_depenetration_velocity=5.0,
-    #             disable_gravity=False,
-    #         ),
-    #     ),
-    # )
     object: RigidObjectCfg | DeformableObjectCfg = MISSING
-    # table: AssetBaseCfg = MISSING
-    # plane: AssetBaseCfg = MISSING
-    table = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, 0], rot=[1.0, 0, 0, 0]),
-        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd"),
-    )
-    plane = AssetBaseCfg(
-        prim_path="/World/GroundPlane",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.79]),
-        spawn=GroundPlaneCfg(),
-    )
+    table: AssetBaseCfg = MISSING
+    plane: AssetBaseCfg = MISSING
     light = AssetBaseCfg(
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
@@ -146,8 +120,8 @@ class ObservationsCfg:
 
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
-        initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
+        initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
+        initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
         ascend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
         descend_target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
         current_phase = ObsTerm(func=mdp.current_phase)
@@ -168,6 +142,14 @@ class EventCfg:
         func=mdp.reset_scene_to_default,
         mode="reset",
     )
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.1, 0.1),
+            "velocity_range": (0.0, 0.0),
+        },
+    )
     reset_object_position = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
@@ -179,6 +161,10 @@ class EventCfg:
     )
     cache_object_initial_pose = EventTerm(
         func=mdp.cache_object_initial_pose,
+        mode="reset",
+    )
+    cache_ee_initial_pose = EventTerm(
+        func=mdp.cache_ee_initial_pose,
         mode="reset",
     )
     reset_phase_flags = EventTerm(
@@ -226,6 +212,10 @@ class RewardsCfg:
         weight=1.0,
     )
 
+    ee_motion_penalty = RewTerm(
+        func=mdp.ee_motion_penalty,
+        weight=-0.0,
+    )
     ee_alignment_penalty = RewTerm(
         func=mdp.world_ee_z_axis_alignment_penalty,
         params={"body_name": MISSING},
@@ -234,12 +224,12 @@ class RewardsCfg:
     arm_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
         params={"action_type": "arm"},
-        weight=-0.05,
+        weight=-0.03, #-0.05
     )
     arm_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty,
         params={"joint_type": "arm"},
-        weight=-0.02,
+        weight=-0.012, #-0.02
     )
     arm_acceleration_penalty = RewTerm(
         func=mdp.joint_acceleration_penalty,
@@ -294,19 +284,23 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     arm_action_penalty = CurrTerm(
-        func=mdp.modify_reward_weight,
+        func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "arm_action_penalty",
-            "num_steps": 100000,
-            "weight": -0.25,
+            "num_steps_1": 100000,
+            "weight_1": -0.09,
+            "num_steps_2": 250000,
+            "weight_2": -0.27,
         }
     )
     arm_velocity_penalty = CurrTerm(
-        func=mdp.modify_reward_weight,
+        func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "arm_velocity_penalty",
-            "num_steps": 100000,
-            "weight": -0.04,
+            "num_steps_1": 100000,
+            "weight_1": -0.024,
+            "num_steps_2": 250000,
+            "weight_2": -0.05,
         }
     )
     arm_acceleration_penalty = CurrTerm(
@@ -343,6 +337,14 @@ class CurriculumCfg:
             "term_name": "gripper_acceleration_penalty",
             "num_steps": 200000,
             "weight": -0.000008,
+        }
+    )
+    ee_motion_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "ee_motion_penalty",
+            "num_steps": 300000,
+            "weight": -0.05,
         }
     )
 

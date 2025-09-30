@@ -84,7 +84,17 @@ def ee_distance(
     ee_pos_b, _  = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
 
     dist_b = torch.norm(obj_pos_b - ee_pos_b, dim=1)
-    reach_reward = 1 - torch.tanh(dist_b / std)
+
+    initial_obj_pos_b = getattr(env, "_object_initial_pos_b", None)
+    initial_ee_pos_b = getattr(env, "_ee_initial_pos_b", None)
+    if initial_obj_pos_b is not None and initial_ee_pos_b is not None:
+        initial_dist = torch.norm(initial_obj_pos_b - initial_ee_pos_b, dim=1)
+        norm_factor = torch.clamp(initial_dist, min=1e-6)
+        normalized_dist = dist_b / norm_factor
+    else:
+        normalized_dist = dist_b
+
+    reach_reward = 1 - torch.tanh(normalized_dist / std)
     reward = torch.where(phases["pick_phase"], reach_reward*1.5, 0.0)
     return reward
 
@@ -140,7 +150,7 @@ def object_height(
     env: ManagerBasedRLEnv,
     ascend_threshold: float = 0.03,
     descend_threshold: float = 0.05,
-    place_threshold: float = 0.015,
+    place_threshold: float = 0.02,
 ) -> torch.Tensor:
     phases = _phase_states(env)
     ee_frame: FrameTransformer = env.scene["ee_frame"]
@@ -176,9 +186,8 @@ def object_track(
     ee_frame: FrameTransformer = env.scene["ee_frame"]
     
     ascend_command = env.command_manager.get_command("ascend")
-    descend_command = env.command_manager.get_command("descend")        
-    command = torch.where(phases["ascend_phase"].unsqueeze(-1).expand(-1, descend_command.shape[-1]),
-                          ascend_command, descend_command)
+    descend_command = env.command_manager.get_command("descend")
+    command = torch.where(phases["ascend_phase"].unsqueeze(-1).expand(-1, descend_command.shape[-1]), ascend_command, descend_command)
     
     target_pos_b = command[:, :3]
     ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
@@ -199,11 +208,56 @@ def object_track(
     
     distance = torch.norm(object_pos_b - target_pos_b, dim=1)
     height_diff = torch.abs(object_pos_b[:, 2] - target_pos_b[:, 2])
-    command_reward = 1 - torch.tanh((distance + height_diff) / std)
+    metric = distance + height_diff
+
+    normalized_metric = metric
+
+    initial_obj_pos_b = getattr(env, "_object_initial_pos_b", None)
+    if initial_obj_pos_b is not None:
+        ascend_norm = torch.clamp(torch.norm(initial_obj_pos_b - ascend_command[:, :3], dim=1), min=1e-6)
+        normalized_metric = torch.where(phases["ascend_phase"], metric / ascend_norm, normalized_metric)
+
+    descend_norm = torch.clamp(torch.norm(ascend_command[:, :3] - descend_command[:, :3], dim=1), min=1e-6)
+    descend_mask = phases["descend_phase"] | phases["place_phase"]
+    normalized_metric = torch.where(descend_mask, metric / descend_norm, normalized_metric)
+
+    command_reward = 1 - torch.tanh(normalized_metric / std)
 
     reward = torch.where(grasping & (phases["ascend_phase"] | phases["descend_phase"]), command_reward*2.5, 
                  torch.where(grasping & phases["place_phase"], command_reward*0.5, 0.0))
     return reward
+
+
+
+def ee_motion_penalty(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Penalty proportional to the EE displacement since the previous step."""
+
+    robot: RigidObject = env.scene[robot_cfg.name]
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+
+    ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
+
+    ee_pos_relative = ee_pos_w - robot.data.root_pos_w
+    robot_quat_inv = quat_inv(robot.data.root_quat_w)
+    ee_pos_b, _ = combine_frame_transforms(
+        torch.zeros_like(robot.data.root_pos_w),
+        robot_quat_inv,
+        ee_pos_relative,
+    )
+
+    prev_pose = getattr(env, "_prev_ee_pos_b", None)
+    if prev_pose is None:
+        env._prev_ee_pos_b = ee_pos_b.clone()
+        return torch.zeros(env.num_envs, device=env.device)
+
+    delta = ee_pos_b - prev_pose
+    env._prev_ee_pos_b = ee_pos_b.clone()
+
+    return torch.linalg.norm(delta, dim=1)
 
 def initial_pose(
     env: ManagerBasedRLEnv,

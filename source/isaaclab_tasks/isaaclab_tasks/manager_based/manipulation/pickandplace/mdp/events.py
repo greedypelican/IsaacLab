@@ -153,3 +153,28 @@ def cache_object_initial_pose(
     # Write for just the resetting envs
     env._object_initial_pos_b[env_ids] = obj_pos_b
     env._object_initial_quat_b[env_ids] = obj_quat_b
+
+
+def cache_ee_initial_pose(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+):
+    """Cache the end-effector's initial position expressed in the robot's root frame."""
+
+    robot: Articulation | RigidObject = env.scene[robot_cfg.name]
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+
+    ee_pos_w = ee_frame.data.target_pos_w[env_ids, 0, :]
+    robot_pos_w = robot.data.root_pos_w[env_ids]
+    robot_quat_w = robot.data.root_quat_w[env_ids]
+    ee_pos_b, _ = subtract_frame_transforms(robot_pos_w, robot_quat_w, ee_pos_w)
+
+    if not hasattr(env, "_ee_initial_pos_b"):
+        env._ee_initial_pos_b = torch.zeros(env.num_envs, 3, device=env.device)
+    if not hasattr(env, "_prev_ee_pos_b"):
+        env._prev_ee_pos_b = torch.zeros(env.num_envs, 3, device=env.device)
+
+    env._ee_initial_pos_b[env_ids] = ee_pos_b
+    env._prev_ee_pos_b[env_ids] = ee_pos_b

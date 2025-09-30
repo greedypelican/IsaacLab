@@ -62,8 +62,8 @@ def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
 def object_out_of_bounds(
     env: ManagerBasedRLEnv,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    x_bounds: tuple[float, float] = (-0.168, 0.715),
-    y_bounds: tuple[float, float] = (-0.366, 0.366)
+    x_bounds: tuple[float, float] = (-0.3, 0.3),
+    y_bounds: tuple[float, float] = (-0.3, 0.3)
 ) -> torch.Tensor:
     """Termination condition for object going out of bounds relative to env origins.
     

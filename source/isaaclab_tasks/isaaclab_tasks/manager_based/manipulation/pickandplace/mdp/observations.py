@@ -10,6 +10,7 @@ import torch
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms, quat_mul
+from isaaclab.sensors import FrameTransformer
 from isaaclab.envs import ManagerBasedRLEnv
 
 # Import phase_flags from events module
@@ -74,6 +75,18 @@ def object_initial_orientation_in_robot_root_frame(
     if not hasattr(env, "_object_initial_quat_b"):
         env._object_initial_quat_b = torch.zeros(env.num_envs, 4, device=env.device)
     return env._object_initial_quat_b
+
+
+def ee_frame_pose(
+    env: ManagerBasedRLEnv,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """The end-effector pose (position in env frame, quaternion in world frame)."""
+
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos = ee_frame.data.target_pos_w[:, 0, :] - env.scene.env_origins
+    ee_quat = ee_frame.data.target_quat_w[:, 0, :]
+    return torch.cat((ee_pos, ee_quat), dim=1)
 
 
 def current_phase(

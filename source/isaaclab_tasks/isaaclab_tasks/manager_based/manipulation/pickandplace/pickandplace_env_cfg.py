@@ -122,6 +122,7 @@ class ObservationsCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
         initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
+        ee_frame_pose = ObsTerm(func=mdp.ee_frame_pose)
         move_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "move"})
         target_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "target"})
         current_phase = ObsTerm(func=mdp.current_phase)
@@ -219,17 +220,17 @@ class RewardsCfg:
     ee_alignment_penalty = RewTerm(
         func=mdp.world_ee_z_axis_alignment_penalty,
         params={"body_name": MISSING},
-        weight=-1.0, 
+        weight=-0.0, 
     )
     arm_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
         params={"action_type": "arm"},
-        weight=-0.03, #-0.05
+        weight=-0.0,
     )
     arm_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty,
         params={"joint_type": "arm"},
-        weight=-0.012, #-0.02
+        weight=-0.0,
     )
     arm_acceleration_penalty = RewTerm(
         func=mdp.joint_acceleration_penalty,
@@ -284,11 +285,23 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     ee_motion_penalty = CurrTerm(
-        func=mdp.modify_reward_weight,
+        func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "ee_motion_penalty",
-            "num_steps": 100000,
-            "weight": -0.03,
+            "num_steps_1": 100000,
+            "weight_1": -0.05,
+            "num_steps_2": 200000,
+            "weight_2": -0.1,
+        }
+    )
+    ee_alignment_penalty = CurrTerm(
+        func=mdp.modify_reward_weight_multi_stage,
+        params={
+            "term_name": "ee_alignment_penalty",
+            "num_steps_1": 100000,
+            "weight_1": -5.0,
+            "num_steps_2": 200000,
+            "weight_2": -10.0,
         }
     )
     arm_action_penalty = CurrTerm(
@@ -296,9 +309,9 @@ class CurriculumCfg:
         params={
             "term_name": "arm_action_penalty",
             "num_steps_1": 100000,
-            "weight_1": -0.09,
-            "num_steps_2": 250000,
-            "weight_2": -0.27,
+            "weight_1": -0.05,
+            "num_steps_2": 200000,
+            "weight_2": -0.25,
         }
     )
     arm_velocity_penalty = CurrTerm(
@@ -306,8 +319,8 @@ class CurriculumCfg:
         params={
             "term_name": "arm_velocity_penalty",
             "num_steps_1": 100000,
-            "weight_1": -0.024,
-            "num_steps_2": 250000,
+            "weight_1": -0.02,
+            "num_steps_2": 200000,
             "weight_2": -0.05,
         }
     )
@@ -315,7 +328,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "arm_acceleration_penalty",
-            "num_steps": 200000,
+            "num_steps": 300000,
             "weight": -0.00002,
         }
     )
@@ -323,8 +336,8 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_action_penalty",
-            "num_steps_1": 50000,
-            "num_steps_2": 150000,
+            "num_steps_1": 100000,
+            "num_steps_2": 200000,
             "weight_1": -0.04,
             "weight_2": -0.2,
         }
@@ -333,8 +346,8 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_velocity_penalty",
-            "num_steps_1": 50000,
-            "num_steps_2": 150000,
+            "num_steps_1": 100000,
+            "num_steps_2": 200000,
             "weight_1": -0.008,
             "weight_2": -0.016,
         }
@@ -343,7 +356,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "gripper_acceleration_penalty",
-            "num_steps": 200000,
+            "num_steps": 300000,
             "weight": -0.000008,
         }
     )

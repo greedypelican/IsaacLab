@@ -17,7 +17,7 @@ from isaaclab.utils.math import matrix_from_quat
 from isaaclab.utils.math import quat_inv
 from isaaclab.envs import ManagerBasedRLEnv
 
-from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD, ASCEND_Z_OFFSET
+from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD, ASCEND_Z_POS
 
 
 def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
@@ -73,7 +73,7 @@ def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 def ee_distance(
     env: ManagerBasedRLEnv,
-    std: float = 0.5,
+    std: float = 0.7,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
@@ -158,7 +158,7 @@ def object_height(
     height_b = ee_pos_b[:, 2]
 
     grasping = _is_grasping(env)
-    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.25), 1.0, 0.0)
+    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.18), 1.0, 0.0)
     descend_reward = torch.where(height_b <= descend_threshold, 1.0, 0.0)
     place_reward = torch.where(height_b >= place_threshold, 1.0, 0.0)
     reward = torch.where(grasping & (phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"]), ascend_reward,
@@ -168,7 +168,7 @@ def object_height(
 
 def object_track(
     env: ManagerBasedRLEnv,
-    std: float = 0.3,
+    std: float = 0.5,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Reward the agent for tracking the phase-specific waypoints using a tanh kernel."""
@@ -257,7 +257,7 @@ def ee_motion_penalty(
 
 def initial_pose(
     env: ManagerBasedRLEnv,
-    std: float = 1.0,
+    std: float = 1.3,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     joint_names: list[str] | None = None,
 ) -> torch.Tensor:
@@ -309,7 +309,7 @@ def joint_similarity(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg  = SceneEntityCfg("robot"),
     joint_names: list[str] | None = None,
-    std: float = 0.3,
+    std: float = 0.5,
 ) -> torch.Tensor:
     """Penalty based on cosine similarity between current and default joint positions.
 
@@ -393,7 +393,7 @@ def world_ee_z_axis_alignment_penalty(
     penalty = misalignment / 2.0  # Normalize to [0, 1]
     penalty = torch.square(penalty)  # Square for sharper penalty
     
-    return torch.clamp(penalty, max=2.0)
+    return torch.clamp(penalty, max=1.0, min=1e-6) * 10
 
 
 def object_world_z_axis_alignment_penalty(

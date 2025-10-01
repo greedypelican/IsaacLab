@@ -10,9 +10,10 @@ from isaaclab.envs import ManagerBasedRLEnv
 phase_flags = {}
 GRASP_THRESHOLD = 1.0
 RELEASE_THRESHOLD = 0.05
-ASCEND_Z_OFFSET = 0.15
+ASCEND_Z_POS = 0.15
 ASCEND_Z_TOL = 0.03
 PLANAR_TOL = 0.03
+READY_JOINT_TOL = 0.2
 
 def reset_phase_flags(
     env: ManagerBasedRLEnv,
@@ -102,7 +103,7 @@ def check_and_update_phase_flags(
         ascend_target = env._object_initial_pos_b[env_ids].clone()
     else:
         ascend_target = obj_pos_b.clone()
-    ascend_target[:, 2] = ASCEND_Z_OFFSET
+    ascend_target[:, 2] = ASCEND_Z_POS
 
     obj_z = obj_pos_b[:, 2]
     ascend_z = ascend_target[:, 2]
@@ -124,7 +125,7 @@ def check_and_update_phase_flags(
     # Phase 4: object가 target command 상부와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
     target_pos_b = target_command[env_ids, :3]
     target_pre_descend = target_pos_b.clone()
-    target_pre_descend[:, 2] = ASCEND_Z_OFFSET
+    target_pre_descend[:, 2] = ASCEND_Z_POS
     pre_target_xy_err = torch.norm(target_pre_descend[:, :2] - obj_pos_b[:, :2], dim=1)
     pre_target_z = target_pre_descend[:, 2]
     pre_target_z_reached = torch.abs(obj_z - pre_target_z) < ASCEND_Z_TOL
@@ -153,12 +154,16 @@ def check_and_update_phase_flags(
         )
         env._object_pos_b_at_phase5[new_env_ids] = obj_pos_b_cache
 
-    # Phase 6: initial joint state 와 가깝고 releasing 상태
+    # Phase 6: releasing 상태이면서 기본 관절 자세 근처에 도달하면 ready 단계로 전환
     joint_ids, _ = robot.find_joints(["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "left_outer_knuckle_joint"])
-    # Calculate deviation using L2 norm
-    joint_deviation = torch.linalg.norm(robot.data.joint_pos[:, joint_ids] - robot.data.default_joint_pos[:, joint_ids], dim=1)
-    phase6_condition = (joint_deviation < 0.1) & releasing
-    # phase5가 완료된 환경들에서만 phase6 완료 업데이트
+    if len(joint_ids) > 0:
+        joint_pos = robot.data.joint_pos[env_ids][:, joint_ids]
+        default_joint_pos = robot.data.default_joint_pos[env_ids][:, joint_ids]
+        joint_deviation = torch.linalg.norm(joint_pos - default_joint_pos, dim=1)
+        phase6_condition = (joint_deviation < READY_JOINT_TOL) & releasing
+    else:
+        phase6_condition = releasing
+
     phase_flags["phase6_complete"][env_ids] = phase_flags["phase6_complete"][env_ids] | (
         phase6_condition & phase_flags["phase5_complete"][env_ids]
     )

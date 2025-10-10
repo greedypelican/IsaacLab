@@ -13,7 +13,7 @@ RELEASE_THRESHOLD = 0.05
 ASCEND_Z_POS = 0.15
 ASCEND_Z_TOL = 0.03
 PLANAR_TOL = 0.03
-READY_JOINT_TOL = 0.2
+READY_JOINT_TOL = 0.5
 
 def reset_phase_flags(
     env: ManagerBasedRLEnv,

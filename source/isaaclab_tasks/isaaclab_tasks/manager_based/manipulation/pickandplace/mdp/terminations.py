@@ -51,8 +51,7 @@ def time_out_with_phase_logging(env: ManagerBasedRLEnv) -> torch.Tensor:
         env.extras["log"]["Phases/phase_3_count"] = torch.sum(phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"]).item()
         env.extras["log"]["Phases/phase_4_count"] = torch.sum(phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"]).item()
         env.extras["log"]["Phases/phase_5_count"] = torch.sum(phase_flags["phase4_complete"] & ~phase_flags["phase5_complete"]).item()
-        env.extras["log"]["Phases/phase_6_count"] = torch.sum(phase_flags["phase5_complete"] & ~phase_flags["phase6_complete"]).item()
-        env.extras["log"]["Phases/phase_7_count"] = torch.sum(phase_flags["phase6_complete"]).item()
+        env.extras["log"]["Phases/phase_6_count"] = torch.sum(phase_flags["phase5_complete"]).item()
         
         # Debug print
         # print(f"Phase metrics logged: phase0={env.extras['log']['Metrics/phase_0_count']}, phase1={env.extras['log']['Metrics/phase_1_count']}, phase2={env.extras['log']['Metrics/phase_2_count']}")
@@ -143,12 +142,8 @@ def object_drop(
     right_contact = (right_force_magnitudes >= contact_threshold)
     both_contact = left_contact & right_contact
     
-    # Object is dropped if:
-    # 1. phase1_complete is True (object was successfully grasped)
-    # 2. Object is above height threshold (was lifted)
-    # 3. Both fingers lost contact (grasping failed after success)
-    object_drop = phase_flags["phase1_complete"] & (object_height > height_threshold) & ~both_contact
-    
+    # Drop only after grasp (phase1 complete) but before phase3 completes (i.e., up to and including descend stage)
+    object_drop = (phase_flags["phase1_complete"] & ~phase_flags["phase3_complete"] & (object_height > height_threshold) & ~both_contact)
     return object_drop
 
 # def object_move_after_place(

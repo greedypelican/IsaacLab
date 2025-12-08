@@ -76,30 +76,30 @@ class SceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command terms for the MDP."""
 
-    move = mdp.UniformPoseCommandCfg(
+    ascend = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name=MISSING,
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.15, 0.20), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+            pos_x=(0.0, 0.0), pos_y=(0.0, 0.0), pos_z=(0.0, 0.0), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
         ),
     )
-    target = mdp.UniformPoseCommandCfg(
+    descend = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name=MISSING,
         resampling_time_range=(EPISODE_LENGTH_SEC, EPISODE_LENGTH_SEC),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.5), pos_y=(-0.2, 0.2), pos_z=(0.02, 0.02), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
+            pos_x=(0.0, 0.0), pos_y=(0.0, 0.0), pos_z=(0.0, 0.0), roll=(0.0, 0.0), pitch=(math.pi/2, math.pi/2), yaw=(0.0, 0.0)
         ),
     )
 
     def __post_init__(self):
-        self.move.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/move_pose")
-        self.move.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
-        self.target.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/target_pose")
-        self.target.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
+        self.ascend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/move_pose")
+        self.ascend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.1, 0.0))
+        self.descend.goal_pose_visualizer_cfg = MARKER_CFG.replace(prim_path="/Visuals/Command/target_pose")
+        self.descend.goal_pose_visualizer_cfg.markers["cuboid"].visual_material = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.1, 0.6))
 
 
 @configclass
@@ -120,11 +120,11 @@ class ObservationsCfg:
 
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        initial_object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
-        initial_object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.01, n_max=0.01))
+        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
+        object_orientation = ObsTerm(func=mdp.object_orientation_in_robot_root_frame, noise=Unoise(n_min=-0.015, n_max=0.015))
         ee_frame_pose = ObsTerm(func=mdp.ee_frame_pose)
-        move_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "move"})
-        target_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "target"})
+        ascend_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "ascend"})
+        descend_command_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "descend"})
         current_phase = ObsTerm(func=mdp.current_phase)
         actions = ObsTerm(func=mdp.last_action)
 
@@ -147,7 +147,7 @@ class EventCfg:
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
-            "position_range": (-0.1, 0.1),
+            "position_range": (0.0, 0.0),
             "velocity_range": (0.0, 0.0),
         },
     )
@@ -156,7 +156,7 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0), "roll": (-math.pi, math.pi)},
+            "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0), "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
             "velocity_range": {},
         },
     )
@@ -224,32 +224,32 @@ class RewardsCfg:
     )
     arm1_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
-        params={"action_type": "arm_1"},
+        params={"action_type": "arm1"},
         weight=-0.0,
     )
     arm1_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty,
-        params={"joint_type": "arm_1"},
+        params={"joint_type": "arm1"},
         weight=-0.0,
     )
     arm1_acceleration_penalty = RewTerm(
         func=mdp.joint_acceleration_penalty,
-        params={"joint_type": "arm_1"},
+        params={"joint_type": "arm1"},
         weight=-0.0,
     )
     arm2_action_penalty = RewTerm(
         func=mdp.action_rate_penalty,
-        params={"action_type": "arm_2"},
+        params={"action_type": "arm2"},
         weight=-0.0,
     )
     arm2_velocity_penalty = RewTerm(
         func=mdp.joint_velocity_penalty,
-        params={"joint_type": "arm_2"},
+        params={"joint_type": "arm2"},
         weight=-0.0,
     )
     arm2_acceleration_penalty = RewTerm(
         func=mdp.joint_acceleration_penalty,
-        params={"joint_type": "arm_2"},
+        params={"joint_type": "arm2"},
         weight=-0.0,
     )
     gripper_action_penalty = RewTerm(
@@ -280,19 +280,20 @@ class TerminationsCfg:
 
     object_dropping = DoneTerm(
         func=mdp.object_drop,
-        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.05},
+        params={"object_cfg": SceneEntityCfg("object"), "height_threshold": 0.0},
     )
     object_out_of_bounds = DoneTerm(
         func=mdp.object_out_of_bounds,
-        params={"object_cfg": SceneEntityCfg("object")},
+        # Widen bounds to cover the object's initial spawn (x≈0.5) relative to env origin
+        params={"object_cfg": SceneEntityCfg("object"), "x_bounds": (0.0, 0.0), "y_bounds": (0.0, 0.0)},
     )
     arm_contact = DoneTerm(
         func=mdp.illegal_contact,
         params={"sensor_cfg": SceneEntityCfg("contact_forces_arm"), "threshold": 1.0},
     )
-    object_move_after_place = DoneTerm(
-        func=mdp.object_move_after_place,
-    )
+    # object_move_after_place = DoneTerm(
+    #     func=mdp.object_move_after_place,
+    # )
 
 
 @configclass
@@ -303,9 +304,9 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "ee_motion_penalty",
-            "num_steps_1": 100000,
+            "num_steps_1": 50000,
             "weight_1": -0.5,
-            "num_steps_2": 200000,
+            "num_steps_2": 125000,
             "weight_2": -1.0,
         }
     )
@@ -313,9 +314,9 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "ee_alignment_penalty",
-            "num_steps_1": 100000,
+            "num_steps_1": 50000,
             "weight_1": -0.5,
-            "num_steps_2": 200000,
+            "num_steps_2": 125000,
             "weight_2": -1.0,
         }
     )
@@ -325,7 +326,7 @@ class CurriculumCfg:
             "term_name": "arm1_action_penalty",
             "num_steps_1": 25000,
             "weight_1": -0.05,
-            "num_steps_2": 125000,
+            "num_steps_2": 100000,
             "weight_2": -0.25,
         }
     )
@@ -335,7 +336,7 @@ class CurriculumCfg:
             "term_name": "arm1_velocity_penalty",
             "num_steps_1": 25000,
             "weight_1": -0.02,
-            "num_steps_2": 125000,
+            "num_steps_2": 100000,
             "weight_2": -0.05,
         }
     )
@@ -343,7 +344,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "arm1_acceleration_penalty",
-            "num_steps": 225000,
+            "num_steps": 75000,
             "weight": -0.00002,
         }
     )
@@ -353,7 +354,7 @@ class CurriculumCfg:
             "term_name": "arm2_action_penalty",
             "num_steps_1": 25000,
             "weight_1": -0.03,
-            "num_steps_2": 125000,
+            "num_steps_2": 100000,
             "weight_2": -0.15,
         }
     )
@@ -363,7 +364,7 @@ class CurriculumCfg:
             "term_name": "arm2_velocity_penalty",
             "num_steps_1": 25000,
             "weight_1": -0.012,
-            "num_steps_2": 125000,
+            "num_steps_2": 100000,
             "weight_2": -0.03,
         }
     )
@@ -371,7 +372,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "arm2_acceleration_penalty",
-            "num_steps": 225000,
+            "num_steps": 75000,
             "weight": -0.000012,
         }
     )
@@ -379,8 +380,8 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_action_penalty",
-            "num_steps_1": 75000,
-            "num_steps_2": 175000,
+            "num_steps_1": 25000,
+            "num_steps_2": 100000,
             "weight_1": -0.04,
             "weight_2": -0.2,
         }
@@ -389,8 +390,8 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight_multi_stage,
         params={
             "term_name": "gripper_velocity_penalty",
-            "num_steps_1": 75000,
-            "num_steps_2": 175000,
+            "num_steps_1": 25000,
+            "num_steps_2": 100000,
             "weight_1": -0.008,
             "weight_2": -0.016,
         }
@@ -399,7 +400,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "gripper_acceleration_penalty",
-            "num_steps": 275000,
+            "num_steps": 75000,
             "weight": -0.000008,
         }
     )

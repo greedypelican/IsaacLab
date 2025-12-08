@@ -17,7 +17,7 @@ from isaaclab.utils.math import matrix_from_quat
 from isaaclab.utils.math import quat_inv
 from isaaclab.envs import ManagerBasedRLEnv
 
-from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD, ASCEND_Z_POS
+from .events import phase_flags, GRASP_THRESHOLD, RELEASE_THRESHOLD, Z_OFFSET
 
 
 def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
@@ -29,11 +29,10 @@ def _phase_states(env: ManagerBasedRLEnv) -> dict[str, torch.Tensor]:
     return {
         "pick_phase": ~phase_flags["phase1_complete"],
         "ascend_phase": phase_flags["phase1_complete"] & ~phase_flags["phase2_complete"],
-        "move_phase1": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
-        "move_phase2": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
-        "descend_phase": phase_flags["phase4_complete"] & ~phase_flags["phase5_complete"],
-        "place_phase": phase_flags["phase5_complete"] & ~phase_flags["phase6_complete"],
-        "ready_phase": phase_flags["phase6_complete"],
+        "descend_phase": phase_flags["phase2_complete"] & ~phase_flags["phase3_complete"],
+        "place_phase": phase_flags["phase3_complete"] & ~phase_flags["phase4_complete"],
+        "goback_phase": phase_flags["phase4_complete"] & ~phase_flags["phase5_complete"],
+        "ready_phase": phase_flags["phase5_complete"],
     }
 
 def _is_grasping(env: ManagerBasedRLEnv, contact_threshold: float = GRASP_THRESHOLD) -> torch.Tensor:
@@ -50,30 +49,27 @@ def _is_grasping(env: ManagerBasedRLEnv, contact_threshold: float = GRASP_THRESH
 def phase_complete(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Basic reward for phase completion to encourage progression through pick and place phases.
     
-    Provides base rewards for each phase completion:
-    - Ascend phase complete: 4.0 reward
-    - Move phase1 complete: 9.0 reward
-    - Move phase2 complete: 13.0 reward
-    - Descend phase complete: 18.0 reward
-    - Place phase complete: 25.0 reward
-    - Ready phase complete: 30.0 reward
+    Provides base rewards for each phase completion (cumulate):
+    - Pick phase complete: 3.0 reward
+    - Ascend phase complete: 5.0 reward
+    - Descend phase complete: 8.0 reward
+    - Place phase complete: 12.0 reward
+    - GoBack phase complete: 17.0 reward
     """
+
     phases = _phase_states(env)
-    
-    # Calculate cumulative phase rewards with different weights
     phase_rewards = torch.zeros(env.num_envs, device=env.device)
-    phase_rewards += torch.where(phases["ascend_phase"], 4.0, 0.0)
-    phase_rewards += torch.where(phases["move_phase1"], 8.0, 0.0)
-    phase_rewards += torch.where(phases["move_phase2"], 12.0, 0.0)
-    phase_rewards += torch.where(phases["descend_phase"], 16.0, 0.0)
-    phase_rewards += torch.where(phases["place_phase"], 26.0, 0.0)
-    phase_rewards += torch.where(phases["ready_phase"], 36.0, 0.0)
+    phase_rewards += torch.where(phases["ascend_phase"], 3.0, 0.0)
+    phase_rewards += torch.where(phases["descend_phase"], 8.0, 0.0)
+    phase_rewards += torch.where(phases["place_phase"], 16.0, 0.0)
+    phase_rewards += torch.where(phases["goback_phase"], 28.0, 0.0)
+    phase_rewards += torch.where(phases["ready_phase"], 45.0, 0.0)
 
     return phase_rewards
 
 def ee_distance(
     env: ManagerBasedRLEnv,
-    std: float = 0.7,
+    std: float = 0.8,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
@@ -82,6 +78,7 @@ def ee_distance(
     object: RigidObject = env.scene[object_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     robot: RigidObject = env.scene["robot"]
+    descend_command = env.command_manager.get_command("descend")
 
     obj_pos_w = object.data.root_pos_w
     ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
@@ -89,9 +86,18 @@ def ee_distance(
     obj_pos_b, _ = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), obj_pos_w - robot.data.root_pos_w)
     ee_pos_b, _  = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
 
-    dist_b = torch.norm(obj_pos_b - ee_pos_b, dim=1)
-    reach_reward = 1 - torch.tanh(dist_b / std)
-    reward = torch.where(phases["pick_phase"], reach_reward*1.5, 0.0)
+    # Pick phase
+    dist_obj_b = torch.norm(obj_pos_b - ee_pos_b, dim=1)
+    reach_reward = 1 - torch.tanh(dist_obj_b / std)
+
+    # Place phase
+    leave_target_b = descend_command[:, :3].clone()
+    leave_target_b[:, 2] += Z_OFFSET
+    dist_leave_b = torch.norm(leave_target_b - ee_pos_b, dim=1)
+    leave_reward = 1 - torch.tanh(dist_leave_b / std)
+
+    reward = torch.where(phases["pick_phase"], reach_reward * 1.0,
+                 torch.where(phases["place_phase"], leave_reward * 5.0, 0.0))
     return reward
 
 def object_contact(
@@ -129,41 +135,34 @@ def object_contact(
     left_force_norm = torch.clamp(left_force_magnitudes / contact_threshold, 0.0, 1.0)
     right_force_norm = torch.clamp(right_force_magnitudes / contact_threshold, 0.0, 1.0)
     
-    # Calculate quadratic rewards for each finger
-    left_contact_reward = torch.square(left_force_norm) * 0.5
-    right_contact_reward = torch.square(right_force_norm) * 0.5
-    
-    move_mask = phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"] | phases["descend_phase"]
-    left_reward = torch.where(phases["pick_phase"], left_contact_reward*2.5,
-                      torch.where(move_mask, left_contact_reward*0.5,
-                          torch.where(phases["place_phase"], left_contact_reward*-1.5, 0.0)))
-    right_reward = torch.where(phases["pick_phase"], right_contact_reward*2.5,
-                      torch.where(move_mask, right_contact_reward*0.5,
-                          torch.where(phases["place_phase"], right_contact_reward*-1.5, 0.0)))
-    reward = left_reward + right_reward
+    # Contact/release aggregated across both fingers then scaled
+    grasp_reward = (torch.square(left_force_norm) + torch.square(right_force_norm)) * 0.5
+    release_reward = (torch.square(1.0 - left_force_norm) + torch.square(1.0 - right_force_norm)) * 0.5
+
+    reward = torch.where(phases["pick_phase"], grasp_reward * 1.5,
+                 torch.where(phases["ascend_phase"], grasp_reward * 1.0,
+                     torch.where(phases["place_phase"], release_reward * 7.0, 0.0)))
     return reward
 
 def object_height(
     env: ManagerBasedRLEnv,
-    ascend_threshold: float = 0.01,
-    descend_threshold: float = 0.04,
-    place_threshold: float = 0.02,
+    ascend_threshold: float = 0.0,
+    descend_threshold: float = 0.0,
 ) -> torch.Tensor:
     phases = _phase_states(env)
-    ee_frame: FrameTransformer = env.scene["ee_frame"]
     robot: RigidObject = env.scene["robot"]
+    obj: RigidObject = env.scene["object"]
 
-    ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
-    ee_pos_b, _ = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), ee_pos_w - robot.data.root_pos_w)
-    height_b = ee_pos_b[:, 2]
+    obj_pos_w = obj.data.root_pos_w
+    obj_pos_b, _ = combine_frame_transforms(torch.zeros_like(robot.data.root_pos_w), quat_inv(robot.data.root_quat_w), obj_pos_w - robot.data.root_pos_w)
+    height_b = obj_pos_b[:, 2]
 
-    grasping = _is_grasping(env)
-    ascend_reward = torch.where((height_b >= ascend_threshold) & (height_b <= 0.18), 1.0, 0.0)
+    ascend_reward = torch.where(height_b >= ascend_threshold, 1.0, 0.0)
     descend_reward = torch.where(height_b <= descend_threshold, 1.0, 0.0)
-    place_reward = torch.where(height_b >= place_threshold, 1.0, 0.0)
-    reward = torch.where(grasping & (phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"]), ascend_reward,
-                 torch.where(grasping & phases["descend_phase"], descend_reward,
-                     torch.where(phases["place_phase"] | phases["ready_phase"], place_reward, 0.0)))
+    reward = torch.where(phases["pick_phase"], ascend_reward*0.5, 
+                 torch.where(phases["ascend_phase"], ascend_reward*1.0, 
+                     torch.where(phases["descend_phase"], descend_reward*1.5,
+                         torch.where(phases["place_phase"], descend_reward*0.0, 0.0))))
     return reward
 
 def object_track(
@@ -175,12 +174,12 @@ def object_track(
     phases = _phase_states(env)
 
     robot: RigidObject = env.scene[robot_cfg.name]
-    ee_frame: FrameTransformer = env.scene["ee_frame"]
+    obj: RigidObject = env.scene["object"]
 
-    move_command = env.command_manager.get_command("move")
-    target_command = env.command_manager.get_command("target")
+    ascend_command = env.command_manager.get_command("ascend")
+    descend_command = env.command_manager.get_command("descend")
 
-    ee_pos_w = ee_frame.data.target_pos_w[:, 0, :]
+    obj_pos_w = obj.data.root_pos_w
 
     # Grasping detection from finger pad contact sensors
     grasping = _is_grasping(env)
@@ -188,7 +187,7 @@ def object_track(
     robot_pos_w = robot.data.root_pos_w
     robot_quat_w = robot.data.root_quat_w
 
-    object_pos_relative = ee_pos_w - robot_pos_w  # Translate to robot origin
+    object_pos_relative = obj_pos_w - robot_pos_w  # Translate to robot origin
     robot_quat_inv = quat_inv(robot_quat_w)
     object_pos_b, _ = combine_frame_transforms(
         torch.zeros_like(robot_pos_w),  # No translation needed
@@ -196,31 +195,19 @@ def object_track(
         object_pos_relative
     )
 
-    if hasattr(env, "_object_initial_pos_b"):
-        ascend_target = env._object_initial_pos_b.clone()
-    else:
-        ascend_target = object_pos_b.clone()
-    ascend_target[:, 2] = 0.15
+    ascend_target = ascend_command[:, :3]
+    descend_target = descend_command[:, :3]
 
-    move_target = move_command[:, :3].clone()
-    
-    target_baseline = target_command[:, :3]
-    pre_target = target_baseline.clone()
-    pre_target[:, 2] = 0.15
-
+    place_target = object_pos_b  # During place phase, hold current object pose (no command target)
     target_pos_b = torch.where(phases["ascend_phase"].unsqueeze(-1), ascend_target,
-                       torch.where(phases["move_phase1"].unsqueeze(-1), move_target,
-                           torch.where(phases["move_phase2"].unsqueeze(-1), pre_target, target_baseline.clone())))
+                       torch.where(phases["descend_phase"].unsqueeze(-1), descend_target, place_target))
 
     distance = torch.norm(object_pos_b - target_pos_b, dim=1)
     height_diff = torch.abs(object_pos_b[:, 2] - target_pos_b[:, 2])
     command_reward = 1 - torch.tanh((distance + height_diff) / std)
 
-    reward = torch.where(
-        grasping & (phases["ascend_phase"] | phases["move_phase1"] | phases["move_phase2"] | phases["descend_phase"]),
-        command_reward * 2.5,
-        torch.where(grasping & phases["place_phase"], command_reward * 0.5, 0.0)
-    )
+    reward = torch.where(phases["ascend_phase"], command_reward*3.0, 
+                 torch.where(phases["descend_phase"], command_reward*4.5, 0.0))
     return reward
 
 
@@ -301,8 +288,7 @@ def initial_pose(
     # Convert deviation to reward: small deviation -> high reward (in [0, 1))
     proximity_reward = 1.0 - torch.tanh(deviation_norm / std)
 
-    reward = torch.where(phases["place_phase"], proximity_reward*4.0, 
-                 torch.where(phases["ready_phase"], proximity_reward*8.0, 0.0))
+    reward = torch.where(phases["goback_phase"], proximity_reward*15.0, 0.0)
     return reward
 
 def joint_similarity_penalty(
@@ -482,7 +468,7 @@ def joint_torques_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> to
         joint_names = ["joint_5", "joint_6"]
     elif joint_type == "gripper":
         # gripper joints에 대한 velocity penalty 계산
-        joint_names = ["left_outer_knuckle_joint"]  # gripper joint 패턴 (finger, knuckle 포함)
+        joint_names = ["left_outer_knuckle_joint"]
     elif joint_type == "all":
         # 모든 joint에 대한 velocity penalty 계산
         joint_names = ["joint_.*", "left_outer_knuckle_joint"]
@@ -508,6 +494,8 @@ def joint_velocity_penalty(env: ManagerBasedRLEnv, joint_type: str = "all") -> t
     elif joint_type == "arm2":
         # arm joints에 대한 velocity penalty 계산
         joint_names = ["joint_5", "joint_6"]
+    elif joint_type == "gripper":
+        joint_names = ["left_outer_knuckle_joint"]
     elif joint_type == "all":
         # 모든 joint에 대한 velocity penalty 계산
         joint_names = ["joint_.*", "left_outer_knuckle_joint"]

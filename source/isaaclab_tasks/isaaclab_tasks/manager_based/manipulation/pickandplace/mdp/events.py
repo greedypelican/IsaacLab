@@ -9,10 +9,11 @@ from isaaclab.envs import ManagerBasedRLEnv
 # Global phase flags (per environment)
 phase_flags = {}
 GRASP_THRESHOLD = 1.0
-RELEASE_THRESHOLD = 0.05
-ASCEND_Z_POS = 0.15
-ASCEND_Z_TOL = 0.03
-PLANAR_TOL = 0.03
+RELEASE_THRESHOLD = 0.1
+Z_OFFSET = 0.07
+REACH_TOL = 0.03
+Z_TOL = 0.03
+XY_TOL = 0.03
 READY_JOINT_TOL = 0.5
 
 def reset_phase_flags(
@@ -36,7 +37,6 @@ def reset_phase_flags(
         phase_flags["phase3_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase4_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
         phase_flags["phase5_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
-        phase_flags["phase6_complete"] = torch.zeros(new_size, dtype=torch.bool, device=env.device)
     else:
         current_size = phase_flags["phase1_complete"].shape[0]
         for key in ("phase1_complete", "phase2_complete", "phase3_complete", "phase4_complete", "phase5_complete", "phase6_complete"):
@@ -49,7 +49,6 @@ def reset_phase_flags(
     phase_flags["phase3_complete"][env_ids] = False
     phase_flags["phase4_complete"][env_ids] = False
     phase_flags["phase5_complete"][env_ids] = False
-    phase_flags["phase6_complete"][env_ids] = False
 
 
 def check_and_update_phase_flags(
@@ -66,8 +65,8 @@ def check_and_update_phase_flags(
     right_finger_sensor = env.scene.sensors["contact_forces_right_finger_pad"]
     ee_frame: FrameTransformer = env.scene["ee_frame"]
     object: RigidObject = env.scene[object_cfg.name]
-    move_command = env.command_manager.get_command("move")
-    target_command = env.command_manager.get_command("target")
+    ascend_command = env.command_manager.get_command("ascend")
+    descend_command = env.command_manager.get_command("descend")
 
     # contact sensor of fingers (env_ids에 해당하는 환경들만)
     left_forces = left_finger_sensor.data.force_matrix_w[env_ids]
@@ -85,87 +84,61 @@ def check_and_update_phase_flags(
     right_release_contact = (right_force_magnitudes <= RELEASE_THRESHOLD)
     releasing = left_release_contact & right_release_contact
 
-    # Phase 2: ee_frame과 object가 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    ee_pos_w = ee_frame.data.target_pos_w[env_ids, 0, :]  # (N,3)
-    object_pos = object.data.root_pos_w[env_ids]          # (N,3)
-    ee_pos_b, _ = subtract_frame_transforms(
-        robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], ee_pos_w
-    )
-    obj_pos_b, _ = subtract_frame_transforms(
-        robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], object_pos
-    )
-    distance_ee_object = torch.norm(ee_pos_b - obj_pos_b, dim=1)
-    phase1_condition = (distance_ee_object < 0.03) & grasping
+    # Phase 1 goal: Reach & Lift
+    ee_pos_w = ee_frame.data.target_pos_w[env_ids, 0, :]
+    object_pos = object.data.root_pos_w[env_ids]
+    ee_pos_b, _ = subtract_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], ee_pos_w)
+    obj_pos_b, _ = subtract_frame_transforms(robot.data.root_pos_w[env_ids], robot.data.root_quat_w[env_ids], object_pos)
+    lift_target = env._object_initial_pos_b[env_ids].clone() if hasattr(env, "_object_initial_pos_b") else obj_pos_b.clone()
+    lift_target[:, 2] += Z_OFFSET
+    obj_z = obj_pos_b[:, 2]
+    lift_z = lift_target[:, 2]
+    object_reached = torch.norm(ee_pos_b - obj_pos_b, dim=1) < REACH_TOL
+    object_lifted = torch.abs(obj_z - lift_z) < Z_TOL
+    phase1_condition = object_reached & object_lifted & grasping
     phase_flags["phase1_complete"][env_ids] = phase_flags["phase1_complete"][env_ids] | phase1_condition
 
-    # Phase 2 target: initial object position lifted by offset (robot frame)
-    if hasattr(env, "_object_initial_pos_b"):
-        ascend_target = env._object_initial_pos_b[env_ids].clone()
-    else:
-        ascend_target = obj_pos_b.clone()
-    ascend_target[:, 2] = ASCEND_Z_POS
-
-    obj_z = obj_pos_b[:, 2]
-    ascend_z = ascend_target[:, 2]
-    ascend_z_reached = torch.abs(obj_z - ascend_z) < ASCEND_Z_TOL
-
-    phase2_condition = ascend_z_reached & grasping
+    # Phase 2 goal: Ascend
+    ascend_pos_b = ascend_command[env_ids, :3]
+    ascend_z_err = torch.abs(ascend_pos_b[:, 2] - obj_pos_b[:, 2])
+    ascend_xy_err = torch.norm(ascend_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
+    phase2_condition = (ascend_z_err < Z_TOL) & (ascend_xy_err < XY_TOL) & grasping
     phase_flags["phase2_complete"][env_ids] = phase_flags["phase2_complete"][env_ids] | (
         phase2_condition & phase_flags["phase1_complete"][env_ids]
     )
 
-    # Phase 3: object가 move command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    move_pos_b = move_command[env_ids, :3]
-    move_xy_err = torch.norm(move_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
-    phase3_condition = ascend_z_reached & (move_xy_err < PLANAR_TOL) & grasping
+    # Phase 3 goal: Descend
+    descend_pos_b = descend_command[env_ids, :3]
+    descend_z_err = torch.abs(descend_pos_b[:, 2] - obj_pos_b[:, 2])
+    descend_xy_err = torch.norm(descend_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
+    phase3_condition = (descend_z_err < Z_TOL) & (descend_xy_err < XY_TOL) & grasping
     phase_flags["phase3_complete"][env_ids] = phase_flags["phase3_complete"][env_ids] | (
         phase3_condition & phase_flags["phase2_complete"][env_ids]
     )
 
-    # Phase 4: object가 target command 상부와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    target_pos_b = target_command[env_ids, :3]
-    target_pre_descend = target_pos_b.clone()
-    target_pre_descend[:, 2] = ASCEND_Z_POS
-    pre_target_xy_err = torch.norm(target_pre_descend[:, :2] - obj_pos_b[:, :2], dim=1)
-    pre_target_z = target_pre_descend[:, 2]
-    pre_target_z_reached = torch.abs(obj_z - pre_target_z) < ASCEND_Z_TOL
-    phase4_condition = pre_target_z_reached & (pre_target_xy_err < PLANAR_TOL) & grasping
+    # Phase 4 goal: Drop & Leave
+    # Leave target: use descend command with a Z offset
+    leave_pos_b = descend_pos_b.clone()
+    leave_pos_b[:, 2] += Z_OFFSET
+    leave_z_err = torch.abs(leave_pos_b[:, 2] - ee_pos_b[:, 2])
+    leave_xy_err = torch.norm(leave_pos_b[:, :2] - ee_pos_b[:, :2], dim=1)
+    phase4_condition = (leave_z_err < Z_TOL) & (leave_xy_err < XY_TOL) & releasing
     phase_flags["phase4_complete"][env_ids] = phase_flags["phase4_complete"][env_ids] | (
         phase4_condition & phase_flags["phase3_complete"][env_ids]
     )
 
-    # Phase 5: object가 target command와 가깝고 grasping 상태 (ROBOT ROOT FRAME)
-    target_xy_err = torch.norm(target_pos_b[:, :2] - obj_pos_b[:, :2], dim=1)
-    target_z_err = torch.abs(obj_z - target_pos_b[:, 2])
-    phase5_condition = (target_xy_err < PLANAR_TOL) & (target_z_err < ASCEND_Z_TOL) & grasping
-    prev_phase5 = phase_flags["phase5_complete"][env_ids].clone()
-    update_mask = (phase5_condition & phase_flags["phase4_complete"][env_ids]) & ~prev_phase5
-    phase_flags["phase5_complete"][env_ids] = prev_phase5 | (
-        phase5_condition & phase_flags["phase4_complete"][env_ids]
-    )
-
-    # Cache object position in ROBOT ROOT FRAME at the first time phase5 is achieved
-    if not hasattr(env, "_object_pos_b_at_phase5"):
-        env._object_pos_b_at_phase5 = torch.zeros(env.num_envs, 3, device=env.device)
-    if torch.any(update_mask):
-        new_env_ids = env_ids[update_mask]
-        obj_pos_b_cache, _ = subtract_frame_transforms(
-            robot.data.root_pos_w[new_env_ids], robot.data.root_quat_w[new_env_ids], object_pos[update_mask]
-        )
-        env._object_pos_b_at_phase5[new_env_ids] = obj_pos_b_cache
-
-    # Phase 6: releasing 상태이면서 기본 관절 자세 근처에 도달하면 ready 단계로 전환
+    # Phase 5 goal: Go Back to Initial pose
     joint_ids, _ = robot.find_joints(["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "left_outer_knuckle_joint"])
     if len(joint_ids) > 0:
         joint_pos = robot.data.joint_pos[env_ids][:, joint_ids]
         default_joint_pos = robot.data.default_joint_pos[env_ids][:, joint_ids]
         joint_deviation = torch.linalg.norm(joint_pos - default_joint_pos, dim=1)
-        phase6_condition = (joint_deviation < READY_JOINT_TOL) & releasing
+        phase5_condition = (joint_deviation < READY_JOINT_TOL) & releasing
     else:
-        phase6_condition = releasing
+        phase5_condition = releasing
 
-    phase_flags["phase6_complete"][env_ids] = phase_flags["phase6_complete"][env_ids] | (
-        phase6_condition & phase_flags["phase5_complete"][env_ids]
+    phase_flags["phase5_complete"][env_ids] = phase_flags["phase5_complete"][env_ids] | (
+        phase5_condition & phase_flags["phase4_complete"][env_ids]
     )
 
 

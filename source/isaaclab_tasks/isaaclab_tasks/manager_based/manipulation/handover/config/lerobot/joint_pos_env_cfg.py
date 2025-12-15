@@ -20,12 +20,12 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg, GroundPl
 from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 
 from . import mdp
-from isaaclab_tasks.manager_based.manipulation.pickandplace.pickandplace_env_cfg import PickAndPlaceEnvCfg
+from isaaclab_tasks.manager_based.manipulation.handover.handover_env_cfg import HandOverEnvCfg
 from isaaclab_assets.robots.metacombotx import METACOMBOTX_FIXED_CAR_CFG
 
 
 @configclass
-class MetaComBotXPickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
+class LeRobotHandOVerEnvCfg(HandOverEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -174,7 +174,7 @@ class MetaComBotXPickAndPlaceEnvCfg(PickAndPlaceEnvCfg):
 
 
 @configclass
-class MetaComBotXPickAndPlaceEnvCfg_PLAY(MetaComBotXPickAndPlaceEnvCfg):
+class LeRobotHandOVerEnvCfg_PLAY(LeRobotHandOVerEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -182,40 +182,6 @@ class MetaComBotXPickAndPlaceEnvCfg_PLAY(MetaComBotXPickAndPlaceEnvCfg):
         self.episode_length_s = 5.0
 
         self.scene.num_envs = 50
-        self.scene.env_spacing = 1.5
-        # disable randomization for play
-        self.observations.policy.enable_corruption = False
-
-@configclass
-class MetaComBotXPickAndPlaceEnvCfg_MetaSejongPLAY(MetaComBotXPickAndPlaceEnvCfg):
-    def __post_init__(self):
-        # post init of parent
-        super().__post_init__()
-        # make a smaller scene for play
-        self.episode_length_s = 5.0
-
-        self.scene.num_envs = 1
         self.scene.env_spacing = 2.0
         # disable randomization for play
         self.observations.policy.enable_corruption = False
-
-
-        # self.scene.robot.init_state.pos = (-36.85, -94.4, 21.72284)
-
-        # self.scene.object.init_state.pos = [-37.35, -94.4, 21.4018]
-
-
-        # 기존 GroundPlane 제거
-        self.scene.plane = AssetBaseCfg(
-            prim_path="/World/GroundPlane",
-            spawn=UsdFileCfg(
-                usd_path="/home/jhr/Isaac/Assets/Collected_GwangGaeTo/GwangGaeTo.usd",
-                rigid_props=None,
-                scale=(1.0, 1.0, 1.0),
-            ),
-        )
-
-        self.commands.ascend.debug_vis = False
-        self.commands.descend.debug_vis = False
-
-        # self.terminations.object_out_of_bounds = None

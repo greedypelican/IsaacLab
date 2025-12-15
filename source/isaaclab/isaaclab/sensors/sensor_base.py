@@ -23,9 +23,9 @@ from typing import TYPE_CHECKING, Any
 import omni.kit.app
 import omni.timeline
 from isaacsim.core.simulation_manager import IsaacEvents, SimulationManager
-from isaacsim.core.utils.stage import get_current_stage
 
 import isaaclab.sim as sim_utils
+from isaaclab.sim.utils.stage import get_current_stage
 
 if TYPE_CHECKING:
     from .sensor_base_cfg import SensorBaseCfg
@@ -215,6 +215,11 @@ class SensorBase(ABC):
         self._timestamp = torch.zeros(self._num_envs, device=self._device)
         # Timestamp from last update
         self._timestamp_last_update = torch.zeros_like(self._timestamp)
+
+        # Initialize debug visualization handle
+        if self._debug_vis_handle is None:
+            # set initial state of debug visualization
+            self.set_debug_vis(self.cfg.debug_vis)
 
     @abstractmethod
     def _update_buffers_impl(self, env_ids: Sequence[int]):

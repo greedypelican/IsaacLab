@@ -18,11 +18,11 @@ simulation_app = AppLauncher(headless=True).app
 
 import torch
 
-import isaacsim.core.utils.prims as prim_utils
 import pytest
 from isaacsim.core.version import get_version
 
 import isaaclab.sim as sim_utils
+import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import (
     Articulation,
@@ -114,7 +114,7 @@ def generate_surface_gripper(
     for i in range(num_surface_grippers):
         prim_utils.create_prim(f"/World/Env_{i}", "Xform", translation=translations[i][:3])
     articulation = Articulation(articulation_cfg.replace(prim_path="/World/Env_.*/Robot"))
-    surface_gripper_cfg = surface_gripper_cfg.replace(prim_expr="/World/Env_.*/Robot/Gripper/SurfaceGripper")
+    surface_gripper_cfg = surface_gripper_cfg.replace(prim_path="/World/Env_.*/Robot/Gripper/SurfaceGripper")
     surface_gripper = SurfaceGripper(surface_gripper_cfg)
 
     return surface_gripper, articulation, translations

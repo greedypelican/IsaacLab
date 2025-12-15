@@ -35,9 +35,8 @@ simulation_app = app_launcher.app
 
 import torch
 
-import isaacsim.core.utils.prims as prim_utils
-
 import isaaclab.sim as sim_utils
+import isaaclab.sim.utils.prims as prim_utils
 from isaaclab.assets import Articulation, SurfaceGripper, SurfaceGripperCfg
 from isaaclab.sim import SimulationContext
 
@@ -72,7 +71,7 @@ def design_scene():
     # Surface Gripper: Next we define the surface gripper config
     surface_gripper_cfg = SurfaceGripperCfg()
     # We need to tell the View which prim to use for the surface gripper
-    surface_gripper_cfg.prim_expr = "/World/Origin.*/Robot/picker_head/SurfaceGripper"
+    surface_gripper_cfg.prim_path = "/World/Origin.*/Robot/picker_head/SurfaceGripper"
     # We can then set different parameters for the surface gripper, note that if these parameters are not set,
     # the View will try to read them from the prim.
     surface_gripper_cfg.max_grip_distance = 0.1  # [m] (Maximum distance at which the gripper can grasp an object)

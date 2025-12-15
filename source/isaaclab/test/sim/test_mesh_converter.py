@@ -17,15 +17,15 @@ import os
 import random
 import tempfile
 
-import isaacsim.core.utils.prims as prim_utils
-import isaacsim.core.utils.stage as stage_utils
 import omni
 import pytest
 from isaacsim.core.api.simulation_context import SimulationContext
 from pxr import UsdGeom, UsdPhysics
 
+import isaaclab.sim.utils.prims as prim_utils
+import isaaclab.sim.utils.stage as stage_utils
 from isaaclab.sim.converters import MeshConverter, MeshConverterCfg
-from isaaclab.sim.schemas import schemas_cfg
+from isaaclab.sim.schemas import MESH_APPROXIMATION_TOKENS, schemas_cfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR, retrieve_file_path
 
 
@@ -132,10 +132,15 @@ def check_mesh_collider_settings(mesh_converter: MeshConverter):
     assert collision_enabled == exp_collision_enabled, "Collision enabled is not the same!"
     # -- if collision is enabled, check that collision approximation is correct
     if exp_collision_enabled:
-        exp_collision_approximation = mesh_converter.cfg.collision_approximation
-        mesh_collision_api = UsdPhysics.MeshCollisionAPI(mesh_prim)
-        collision_approximation = mesh_collision_api.GetApproximationAttr().Get()
-        assert collision_approximation == exp_collision_approximation, "Collision approximation is not the same!"
+        if mesh_converter.cfg.mesh_collision_props is not None:
+            exp_collision_approximation_str = mesh_converter.cfg.mesh_collision_props.mesh_approximation_name
+            exp_collision_approximation_token = MESH_APPROXIMATION_TOKENS[exp_collision_approximation_str]
+            mesh_collision_api = UsdPhysics.MeshCollisionAPI(mesh_prim)
+            collision_approximation = mesh_collision_api.GetApproximationAttr().Get()
+            # Convert token to string for comparison
+            assert (
+                collision_approximation == exp_collision_approximation_token
+            ), "Collision approximation is not the same!"
 
 
 def test_no_change(assets):
@@ -229,7 +234,6 @@ def test_collider_no_approximation(assets):
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="none",
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)
@@ -241,9 +245,40 @@ def test_collider_no_approximation(assets):
 def test_collider_convex_hull(assets):
     """Convert an OBJ file using convex hull approximation"""
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.ConvexHullPropertiesCfg()
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="convexHull",
+        mesh_collision_props=mesh_collision_prop,
+        collision_props=collision_props,
+    )
+    mesh_converter = MeshConverter(mesh_config)
+
+    # check that mesh conversion is successful
+    check_mesh_collider_settings(mesh_converter)
+
+
+def test_collider_convex_decomposition(assets):
+    """Convert an OBJ file using convex decomposition approximation"""
+    collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.ConvexDecompositionPropertiesCfg()
+    mesh_config = MeshConverterCfg(
+        asset_path=assets["obj"],
+        mesh_collision_props=mesh_collision_prop,
+        collision_props=collision_props,
+    )
+    mesh_converter = MeshConverter(mesh_config)
+
+    # check that mesh conversion is successful
+    check_mesh_collider_settings(mesh_converter)
+
+
+def test_collider_triangle_mesh(assets):
+    """Convert an OBJ file using triangle mesh approximation"""
+    collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.TriangleMeshPropertiesCfg()
+    mesh_config = MeshConverterCfg(
+        asset_path=assets["obj"],
+        mesh_collision_props=mesh_collision_prop,
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)
@@ -255,9 +290,10 @@ def test_collider_convex_hull(assets):
 def test_collider_mesh_simplification(assets):
     """Convert an OBJ file using mesh simplification approximation"""
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.TriangleMeshSimplificationPropertiesCfg()
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="meshSimplification",
+        mesh_collision_props=mesh_collision_prop,
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)
@@ -269,9 +305,10 @@ def test_collider_mesh_simplification(assets):
 def test_collider_mesh_bounding_cube(assets):
     """Convert an OBJ file using bounding cube approximation"""
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.BoundingCubePropertiesCfg()
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="boundingCube",
+        mesh_collision_props=mesh_collision_prop,
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)
@@ -283,9 +320,25 @@ def test_collider_mesh_bounding_cube(assets):
 def test_collider_mesh_bounding_sphere(assets):
     """Convert an OBJ file using bounding sphere"""
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.BoundingSpherePropertiesCfg()
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="boundingSphere",
+        mesh_collision_props=mesh_collision_prop,
+        collision_props=collision_props,
+    )
+    mesh_converter = MeshConverter(mesh_config)
+
+    # check that mesh conversion is successful
+    check_mesh_collider_settings(mesh_converter)
+
+
+def test_collider_mesh_sdf(assets):
+    """Convert an OBJ file using signed distance field approximation"""
+    collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
+    mesh_collision_prop = schemas_cfg.SDFMeshPropertiesCfg()
+    mesh_config = MeshConverterCfg(
+        asset_path=assets["obj"],
+        mesh_collision_props=mesh_collision_prop,
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)
@@ -297,9 +350,10 @@ def test_collider_mesh_bounding_sphere(assets):
 def test_collider_mesh_no_collision(assets):
     """Convert an OBJ file using bounding sphere with collision disabled"""
     collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=False)
+    mesh_collision_prop = schemas_cfg.BoundingSpherePropertiesCfg()
     mesh_config = MeshConverterCfg(
         asset_path=assets["obj"],
-        collision_approximation="boundingSphere",
+        mesh_collision_props=mesh_collision_prop,
         collision_props=collision_props,
     )
     mesh_converter = MeshConverter(mesh_config)

@@ -64,18 +64,19 @@ simulation_app = app_launcher.app
 
 import numpy as np
 
-import isaacsim.core.utils.prims as prim_utils
 import omni.kit
 import omni.kit.commands
+from isaacsim.core.api.materials import PhysicsMaterial
+from isaacsim.core.api.materials.preview_surface import PreviewSurface
+from isaacsim.core.api.objects import DynamicSphere
 from isaacsim.core.api.simulation_context import SimulationContext
 from isaacsim.core.cloner import GridCloner
-from isaacsim.core.materials import PhysicsMaterial, PreviewSurface
-from isaacsim.core.objects import DynamicSphere
 from isaacsim.core.prims import RigidPrim, SingleGeometryPrim, SingleRigidPrim
 from isaacsim.core.utils.extensions import enable_extension
 from isaacsim.core.utils.viewports import set_camera_view
 
 import isaaclab.sim as sim_utils
+import isaaclab.sim.utils.prims as prim_utils
 import isaaclab.terrains as terrain_gen
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.terrains.terrain_importer import TerrainImporter

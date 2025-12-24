@@ -1,0 +1,3 @@
+[submodule "source/isaaclab_tasks/isaaclab_tasks/manager_based/phase_wise_reward_activation"]
+	path = source/isaaclab_tasks/isaaclab_tasks/manager_based/phase_wise_reward_activation
+	url = https://github.com/greedypelican/phase-wise_reward_activation.git
